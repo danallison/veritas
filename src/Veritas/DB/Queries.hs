@@ -35,6 +35,7 @@ module Veritas.DB.Queries
     -- * Worker Queries
   , getPendingExpiredCeremonies
   , getResolvingCeremonies
+  , getAwaitingBeaconCeremonies
   , getUnrevealedParticipants
   , getAwaitingRevealsCeremonies
 
@@ -260,6 +261,11 @@ getResolvingCeremonies :: Connection -> IO [UUID]
 getResolvingCeremonies conn =
   map fromOnly <$> query_ conn
     "SELECT id FROM ceremonies WHERE phase = 'resolving'"
+
+getAwaitingBeaconCeremonies :: Connection -> IO [UUID]
+getAwaitingBeaconCeremonies conn =
+  map fromOnly <$> query_ conn
+    "SELECT id FROM ceremonies WHERE phase = 'awaiting_beacon'"
 
 getUnrevealedParticipants :: Connection -> CeremonyId -> IO [ParticipantId]
 getUnrevealedParticipants conn (CeremonyId cid) =

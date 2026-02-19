@@ -67,6 +67,7 @@ library
     Veritas.Workers.ExpiryChecker
     Veritas.Workers.AutoResolver
     Veritas.Workers.RevealDeadlineChecker
+    Veritas.Workers.BeaconFetcher
     Veritas.External.Drand
     Veritas.Config
 
@@ -99,6 +100,7 @@ test-suite veritas-tests
     Veritas.Core.RevealSpec
     Veritas.Crypto.HashSpec
     Veritas.Crypto.CommitRevealSpec
+    Veritas.External.DrandSpec
     Properties.StateMachineProperties
     Properties.ResolutionProperties
     Properties.AuditLogProperties

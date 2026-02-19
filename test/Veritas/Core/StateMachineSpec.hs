@@ -182,6 +182,35 @@ spec = do
             trNewPhase `shouldBe` Resolving
           Left err -> expectationFailure $ "Expected success, got: " ++ show err
 
+    describe "AwaitingBeacon rejections" $ do
+      it "rejects AnchorBeacon when not in AwaitingBeacon phase" $ do
+        now <- getCurrentTime
+        let anchor = BeaconAnchor
+              { baNetwork = "drand mainnet"
+              , baRound = 12345
+              , baValue = "beacon-value"
+              , baSignature = "beacon-sig"
+              , baFetchedAt = now
+              }
+
+        -- Pending phase
+        let pendingCeremony = mkCeremony ExternalBeacon Immediate 2 (futureTime now)
+        case transition pendingCeremony [] [] (AnchorBeacon anchor) of
+          Left (InvalidPhase Pending AwaitingBeacon) -> pure ()
+          other -> expectationFailure $ "Expected InvalidPhase Pending AwaitingBeacon, got: " ++ show other
+
+        -- Resolving phase
+        let resolvingCeremony = pendingCeremony { phase = Resolving }
+        case transition resolvingCeremony [] [] (AnchorBeacon anchor) of
+          Left (InvalidPhase Resolving AwaitingBeacon) -> pure ()
+          other -> expectationFailure $ "Expected InvalidPhase Resolving AwaitingBeacon, got: " ++ show other
+
+        -- Finalized phase
+        let finalizedCeremony = pendingCeremony { phase = Finalized }
+        case transition finalizedCeremony [] [] (AnchorBeacon anchor) of
+          Left (InvalidPhase Finalized AwaitingBeacon) -> pure ()
+          other -> expectationFailure $ "Expected InvalidPhase Finalized AwaitingBeacon, got: " ++ show other
+
     describe "Resolving phase" $ do
       it "transitions to Finalized when outcome is resolved" $ do
         now <- getCurrentTime

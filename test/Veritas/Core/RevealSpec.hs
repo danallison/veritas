@@ -12,7 +12,7 @@ import Veritas.Core.StateMachine
 import Veritas.Core.Entropy (verifySealForReveal, buildEntropyContributions)
 import Veritas.Core.Resolution (resolve)
 import Veritas.Crypto.CommitReveal (createSeal, defaultEntropyValue)
-import Veritas.API.Handlers (validateTwoPartySafety, validateMethodParams)
+import Veritas.API.Handlers (validateTwoPartySafety, validateMethodParams, validateBeaconSpec)
 
 -- Test helpers
 testCeremonyId :: CeremonyId
@@ -115,6 +115,45 @@ spec = do
 
     it "accepts OfficiantVRF with no reveal params" $ do
       validateMethodParams OfficiantVRF Nothing Nothing
+        `shouldBe` Right ()
+
+  describe "Beacon spec validation" $ do
+    let testSpec = BeaconSpec
+          { beaconNetwork = "default"
+          , beaconRound = Nothing
+          , beaconFallback = CancelCeremony
+          }
+
+    it "requires beaconSpec for ExternalBeacon" $ do
+      validateBeaconSpec ExternalBeacon Nothing
+        `shouldSatisfy` isLeft
+
+    it "requires beaconSpec for Combined" $ do
+      validateBeaconSpec Combined Nothing
+        `shouldSatisfy` isLeft
+
+    it "accepts beaconSpec for ExternalBeacon" $ do
+      validateBeaconSpec ExternalBeacon (Just testSpec)
+        `shouldBe` Right ()
+
+    it "accepts beaconSpec for Combined" $ do
+      validateBeaconSpec Combined (Just testSpec)
+        `shouldBe` Right ()
+
+    it "rejects beaconSpec for ParticipantReveal" $ do
+      validateBeaconSpec ParticipantReveal (Just testSpec)
+        `shouldSatisfy` isLeft
+
+    it "rejects beaconSpec for OfficiantVRF" $ do
+      validateBeaconSpec OfficiantVRF (Just testSpec)
+        `shouldSatisfy` isLeft
+
+    it "accepts no beaconSpec for ParticipantReveal" $ do
+      validateBeaconSpec ParticipantReveal Nothing
+        `shouldBe` Right ()
+
+    it "accepts no beaconSpec for OfficiantVRF" $ do
+      validateBeaconSpec OfficiantVRF Nothing
         `shouldBe` Right ()
 
   describe "Seal verification" $ do

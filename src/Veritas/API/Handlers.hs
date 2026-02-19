@@ -4,6 +4,7 @@ module Veritas.API.Handlers
   , AppEnv(..)
   , validateTwoPartySafety
   , validateMethodParams
+  , validateBeaconSpec
   ) where
 
 import Control.Monad (when)
@@ -70,6 +71,11 @@ createCeremony AppEnv{..} req = do
     Left msg -> throwError err400 { errBody = LBS.fromStrict (TE.encodeUtf8 msg) }
     Right () -> pure ()
 
+  -- Beacon spec validation
+  case validateBeaconSpec (crqEntropyMethod req) (crqBeaconSpec req) of
+    Left msg -> throwError err400 { errBody = LBS.fromStrict (TE.encodeUtf8 msg) }
+    Right () -> pure ()
+
   now <- liftIO getCurrentTime
   cid <- liftIO UUID4.nextRandom
   let ceremony = Ceremony
@@ -123,6 +129,22 @@ validateMethodParams method mRevealDeadline mPolicy = case method of
       case mPolicy of
         Just _  -> Left "non_participation_policy is only for ParticipantReveal and Combined methods"
         Nothing -> Right ()
+
+-- | Validate that beacon_spec is provided for beacon methods (B, D) and absent for others (A, C).
+validateBeaconSpec :: EntropyMethod -> Maybe BeaconSpec -> Either Text ()
+validateBeaconSpec method mSpec = case method of
+  ExternalBeacon -> case mSpec of
+    Nothing -> Left "beacon_spec is required for ExternalBeacon method"
+    Just _  -> Right ()
+  Combined -> case mSpec of
+    Nothing -> Left "beacon_spec is required for Combined method"
+    Just _  -> Right ()
+  ParticipantReveal -> case mSpec of
+    Just _  -> Left "beacon_spec is only for ExternalBeacon and Combined methods"
+    Nothing -> Right ()
+  OfficiantVRF -> case mSpec of
+    Just _  -> Left "beacon_spec is only for ExternalBeacon and Combined methods"
+    Nothing -> Right ()
 
 getCeremonyH :: AppEnv -> UUID -> Handler CeremonyResponse
 getCeremonyH AppEnv{..} cid = do
