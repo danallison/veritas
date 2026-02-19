@@ -105,6 +105,7 @@ test-suite veritas-tests
     Properties.ResolutionProperties
     Properties.AuditLogProperties
     Properties.CommitRevealProperties
+    Properties.StatisticalProperties
   ghc-options:
     -threaded
     -rtsopts

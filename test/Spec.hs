@@ -13,6 +13,7 @@ import qualified Properties.StateMachineProperties
 import qualified Properties.ResolutionProperties
 import qualified Properties.AuditLogProperties
 import qualified Properties.CommitRevealProperties
+import qualified Properties.StatisticalProperties
 
 main :: IO ()
 main = hspec $ do
@@ -27,3 +28,4 @@ main = hspec $ do
   describe "Properties.Resolution" Properties.ResolutionProperties.spec
   describe "Properties.AuditLog" Properties.AuditLogProperties.spec
   describe "Properties.CommitReveal" Properties.CommitRevealProperties.spec
+  describe "Properties.Statistical" Properties.StatisticalProperties.spec

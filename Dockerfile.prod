@@ -1,0 +1,42 @@
+# Stage 1: Build
+FROM haskell:9.6-slim AS builder
+
+WORKDIR /app
+
+# Install libpq-dev for postgresql-simple
+RUN apt-get update && apt-get install -y \
+    curl \
+    gnupg \
+    lsb-release \
+    pkg-config \
+    && curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor -o /usr/share/keyrings/postgresql.gpg \
+    && echo "deb [signed-by=/usr/share/keyrings/postgresql.gpg] http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list \
+    && apt-get update \
+    && apt-get install -y libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy cabal files first for dependency caching
+COPY veritas.cabal cabal.project ./
+RUN cabal update && cabal build --only-dependencies -j4 2>&1 || true
+
+# Copy source and build the executable
+COPY . .
+RUN cabal build exe:veritas
+
+# Copy the built binary to a known location
+RUN cp $(cabal list-bin veritas) /app/veritas-bin
+
+# Stage 2: Runtime
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y \
+    libgmp10 \
+    libpq5 \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /app/veritas-bin /usr/local/bin/veritas
+
+EXPOSE 8080
+
+CMD ["veritas"]

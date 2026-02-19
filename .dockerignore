@@ -1,2 +1,6 @@
 dist-newstyle
 .git
+*.md
+.github
+test
+.claude
