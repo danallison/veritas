@@ -37,8 +37,10 @@ services:
     entrypoint: ["sleep", "infinity"]
     volumes:
       - .:/app
-      - cabal-store:/root/.cabal/store
+      - cabal-store:/root/.local/state/cabal/store
+      - cabal-cache:/root/.cache/cabal
 
 volumes:
   pgdata:
   cabal-store:
+  cabal-cache:

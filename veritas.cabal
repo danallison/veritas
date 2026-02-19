@@ -66,6 +66,7 @@ library
     Veritas.DB.Migrations
     Veritas.Workers.ExpiryChecker
     Veritas.Workers.AutoResolver
+    Veritas.Workers.RevealDeadlineChecker
     Veritas.External.Drand
     Veritas.Config
 
@@ -91,14 +92,17 @@ test-suite veritas-tests
     , QuickCheck        >= 2.14
     , hspec-discover    >= 2.11
   other-modules:
+    TestHelpers
     Veritas.Core.StateMachineSpec
     Veritas.Core.ResolutionSpec
     Veritas.Core.AuditLogSpec
+    Veritas.Core.RevealSpec
     Veritas.Crypto.HashSpec
     Veritas.Crypto.CommitRevealSpec
     Properties.StateMachineProperties
     Properties.ResolutionProperties
     Properties.AuditLogProperties
+    Properties.CommitRevealProperties
   ghc-options:
     -threaded
     -rtsopts

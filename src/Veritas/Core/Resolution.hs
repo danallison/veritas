@@ -12,7 +12,6 @@ module Veritas.Core.Resolution
   , deriveWeightedChoice
   ) where
 
-import Data.Bits (xor)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
 import Data.List (sortBy)
@@ -35,19 +34,18 @@ resolve ctype contributions =
     , combinedEntropy = entropy
     , outcomeProof = OutcomeProof
         { proofEntropyInputs = contributions
-        , proofDerivation = "HKDF-SHA256 derivation from combined entropy"
+        , proofDerivation = "Concatenation in canonical order, SHA-256 hash, HKDF-SHA256 derivation"
         }
     }
 
 -- | Combine multiple entropy contributions into a single value.
--- Contributions are sorted by source for determinism, then XORed,
--- and the result is hashed with SHA-256.
+-- Contributions are sorted by source key for canonical ordering,
+-- concatenated, and hashed with SHA-256 (per protocol Section 3).
 combineEntropy :: [EntropyContribution] -> ByteString
 combineEntropy [] = sha256 "veritas-empty-entropy"
 combineEntropy contributions =
   let sorted = sortBy (comparing sourceKey) contributions
-      xored = foldl1 xorBytes (map ecValue sorted)
-  in sha256 xored
+  in sha256 (BS.concat (map ecValue sorted))
 
 -- | Deterministic sort key for an entropy source.
 -- Uses a stable serialization for ordering.
@@ -57,14 +55,6 @@ sourceKey ec = case ecSource ec of
   DefaultEntropy (ParticipantId pid)     -> (1, toASCIIBytes pid)
   BeaconEntropy _                        -> (2, "beacon")
   VRFEntropy _                           -> (3, "vrf")
-
--- | XOR two bytestrings, padding the shorter one with zeros
-xorBytes :: ByteString -> ByteString -> ByteString
-xorBytes a b =
-  let len = max (BS.length a) (BS.length b)
-      a' = a <> BS.replicate (len - BS.length a) 0
-      b' = b <> BS.replicate (len - BS.length b) 0
-  in BS.pack (BS.zipWith xor a' b')
 
 -- | Derive the appropriate result type from entropy
 deriveResult :: CeremonyType -> ByteString -> CeremonyResult

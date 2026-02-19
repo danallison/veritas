@@ -116,12 +116,12 @@ transition ceremony commitments revealedParties action =
                         _        -> Resolving
                   pure TransitionResult
                     { trNewPhase = nextPhase
-                    , trEvents = [EntropyRevealed pid _val]
+                    , trEvents = []  -- reveals are batched; not published individually
                     }
                 else
                   pure TransitionResult
                     { trNewPhase = AwaitingReveals
-                    , trEvents = [EntropyRevealed pid _val]
+                    , trEvents = []  -- reveals are batched; not published individually
                     }
 
     (AwaitingReveals, ApplyNonParticipation entries) -> do

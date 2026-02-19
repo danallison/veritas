@@ -16,7 +16,7 @@ RUN apt-get update && apt-get install -y \
 
 # Copy cabal files first for dependency caching
 COPY veritas.cabal cabal.project ./
-RUN cabal update && cabal build --only-dependencies -j4 2>&1 || true
+RUN cabal update && cabal build --only-dependencies --enable-tests -j4 2>&1 || true
 
 # Copy source and build
 COPY . .

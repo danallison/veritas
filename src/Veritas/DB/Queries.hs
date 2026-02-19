@@ -29,10 +29,25 @@ module Veritas.DB.Queries
   , insertAuditLogEntry
   , getAuditLog
   , getLastAuditLogEntry
+  , appendAuditLog
+  , eventTypeName
 
     -- * Worker Queries
   , getPendingExpiredCeremonies
   , getResolvingCeremonies
+  , getUnrevealedParticipants
+  , getAwaitingRevealsCeremonies
+
+    -- * Reveal Helpers
+  , revealsToContributions
+
+    -- * Domain Conversions
+  , ceremonyRowToDomain
+  , commitmentRowToDomain
+  , parsePhase
+  , parseEntropyMethod
+  , parseCommitmentMode
+  , parseNonParticipationPolicy
 
     -- * Row types
   , CeremonyRow(..)
@@ -43,14 +58,17 @@ module Veritas.DB.Queries
   ) where
 
 import Data.Aeson (Value, toJSON)
+import qualified Data.Aeson as Aeson
 import Data.ByteString (ByteString)
 import Data.Text (Text)
-import Data.Time (UTCTime)
+import Data.Time (UTCTime, getCurrentTime)
 import Data.UUID (UUID)
 import Database.PostgreSQL.Simple
 import Database.PostgreSQL.Simple.FromRow
 
 import Veritas.Core.Types
+import Veritas.Core.AuditLog (createLogEntry)
+import Veritas.Crypto.Hash (genesisHash)
 
 -- === Ceremonies ===
 
@@ -243,6 +261,22 @@ getResolvingCeremonies conn =
   map fromOnly <$> query_ conn
     "SELECT id FROM ceremonies WHERE phase = 'resolving'"
 
+getUnrevealedParticipants :: Connection -> CeremonyId -> IO [ParticipantId]
+getUnrevealedParticipants conn (CeremonyId cid) =
+  map (\(Only pid) -> ParticipantId pid) <$> query conn
+    "SELECT c.participant_id FROM commitments c \
+    \WHERE c.ceremony_id = ? \
+    \AND c.participant_id NOT IN \
+    \(SELECT participant_id FROM entropy_reveals WHERE ceremony_id = ?)"
+    (cid, cid)
+
+getAwaitingRevealsCeremonies :: Connection -> UTCTime -> IO [UUID]
+getAwaitingRevealsCeremonies conn now =
+  map fromOnly <$> query conn
+    "SELECT id FROM ceremonies \
+    \WHERE phase = 'awaiting_reveals' AND reveal_deadline < ?"
+    (Only now)
+
 -- === Row types ===
 
 data CeremonyRow = CeremonyRow
@@ -311,6 +345,109 @@ data AuditLogRow = AuditLogRow
 
 instance FromRow AuditLogRow where
   fromRow = AuditLogRow <$> field <*> field <*> field <*> field <*> field <*> field <*> field
+
+-- === Reveal Helpers ===
+
+-- | Convert raw entropy reveal rows into domain EntropyContributions.
+-- Correctly tags default-substituted entries as DefaultEntropy.
+revealsToContributions :: CeremonyId -> [(UUID, ByteString, Bool, Bool)] -> [EntropyContribution]
+revealsToContributions cid reveals =
+  [ EntropyContribution
+      { ecCeremony = cid
+      , ecSource = if isDefault
+                   then DefaultEntropy (ParticipantId rpid)
+                   else ParticipantEntropy (ParticipantId rpid)
+      , ecValue = rval
+      }
+  | (rpid, rval, isDefault, _published) <- reveals
+  ]
+
+-- === Domain Conversions ===
+
+ceremonyRowToDomain :: CeremonyRow -> Ceremony
+ceremonyRowToDomain CeremonyRow{..} = Ceremony
+  { ceremonyId = CeremonyId crId
+  , question = crQuestion
+  , ceremonyType = case Aeson.fromJSON crCeremonyType of
+      Aeson.Success ct -> ct
+      _                -> CoinFlip
+  , entropyMethod = parseEntropyMethod crEntropyMethod
+  , requiredParties = fromIntegral crRequiredParties
+  , commitmentMode = parseCommitmentMode crCommitmentMode
+  , commitDeadline = crCommitDeadline
+  , revealDeadline = crRevealDeadline
+  , nonParticipationPolicy = fmap parseNonParticipationPolicy crNonParticipationPolicy
+  , beaconSpec = crBeaconSpec >>= \v -> case Aeson.fromJSON v of
+      Aeson.Success bs -> Just bs
+      _                -> Nothing
+  , phase = parsePhase crPhase
+  , createdBy = ParticipantId crCreatedBy
+  , createdAt = crCreatedAt
+  }
+
+commitmentRowToDomain :: CommitmentRow -> Commitment
+commitmentRowToDomain CommitmentRow{..} = Commitment
+  { commitCeremony = CeremonyId cmrCeremonyId
+  , commitParty = ParticipantId cmrParticipantId
+  , commitSignature = cmrSignature
+  , entropySealHash = cmrEntropySeal
+  , committedAt = cmrCommittedAt
+  }
+
+appendAuditLog :: Connection -> CeremonyId -> CeremonyEvent -> IO ()
+appendAuditLog conn cid event = do
+  now <- getCurrentTime
+  mlast <- getLastAuditLogEntry conn cid
+  let prevHash = maybe genesisHash alrEntryHash mlast
+      seqNum = maybe 0 (\e -> alrSequenceNum e + 1) mlast
+      entry = createLogEntry (LogSequence (fromIntegral seqNum)) cid event now prevHash
+  insertAuditLogEntry conn cid (eventTypeName event) (toJSON event) prevHash (logEntryHash entry)
+
+eventTypeName :: CeremonyEvent -> Text
+eventTypeName = \case
+  CeremonyCreated{}          -> "ceremony_created"
+  ParticipantCommitted{}     -> "participant_committed"
+  EntropyRevealed{}          -> "entropy_revealed"
+  RevealsPublished{}         -> "reveals_published"
+  NonParticipationApplied{}  -> "non_participation_applied"
+  BeaconAnchored{}           -> "beacon_anchored"
+  VRFGenerated{}             -> "vrf_generated"
+  CeremonyResolved{}         -> "ceremony_resolved"
+  CeremonyFinalized          -> "ceremony_finalized"
+  CeremonyExpired            -> "ceremony_expired"
+  CeremonyCancelled{}        -> "ceremony_cancelled"
+  CeremonyDisputed{}         -> "ceremony_disputed"
+
+parsePhase :: Text -> Phase
+parsePhase = \case
+  "pending"          -> Pending
+  "awaiting_reveals" -> AwaitingReveals
+  "awaiting_beacon"  -> AwaitingBeacon
+  "resolving"        -> Resolving
+  "finalized"        -> Finalized
+  "expired"          -> Expired
+  "cancelled"        -> Cancelled
+  "disputed"         -> Disputed
+  _                  -> Pending
+
+parseEntropyMethod :: Text -> EntropyMethod
+parseEntropyMethod = \case
+  "participant_reveal" -> ParticipantReveal
+  "external_beacon"    -> ExternalBeacon
+  "officiant_vrf"      -> OfficiantVRF
+  "combined"           -> Combined
+  _                    -> OfficiantVRF
+
+parseCommitmentMode :: Text -> CommitmentMode
+parseCommitmentMode = \case
+  "deadline_wait" -> DeadlineWait
+  _               -> Immediate
+
+parseNonParticipationPolicy :: Text -> NonParticipationPolicy
+parseNonParticipationPolicy = \case
+  "default_substitution" -> DefaultSubstitution
+  "exclusion"            -> Exclusion
+  _                      -> Cancellation
 
 -- === Helpers ===
 

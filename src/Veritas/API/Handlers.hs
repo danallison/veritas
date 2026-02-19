@@ -2,29 +2,30 @@
 module Veritas.API.Handlers
   ( server
   , AppEnv(..)
+  , validateTwoPartySafety
+  , validateMethodParams
   ) where
 
 import Control.Monad (when)
 import Control.Monad.IO.Class (liftIO)
-import Data.Aeson (toJSON)
-import qualified Data.Aeson as Aeson
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BS8
 import qualified Data.ByteString.Lazy as LBS
+import Data.List (find)
 import Data.Text (Text)
 import qualified Data.Text.Encoding as TE
-import Data.Time (getCurrentTime)
+import Data.Time (UTCTime, getCurrentTime)
 import Data.UUID (UUID)
 import qualified Data.UUID as UUID
 import qualified Data.UUID.V4 as UUID4
-import Database.PostgreSQL.Simple (Connection)
+import GHC.Natural (Natural)
 import Servant
 
 import Veritas.Core.Types
 import Veritas.Core.StateMachine (Action(..), TransitionResult(..), transition)
 import Veritas.Core.Resolution (resolve, deriveIntRange)
-import Veritas.Core.AuditLog (createLogEntry)
+import Veritas.Core.Entropy (verifySealForReveal)
 import Veritas.Crypto.Hash (sha256, genesisHash, deriveUniform)
 import Veritas.Crypto.VRF (generateVRF)
 import Veritas.Crypto.Signatures (KeyPair(..), publicKeyBytes)
@@ -59,6 +60,16 @@ server env =
 
 createCeremony :: AppEnv -> CreateCeremonyRequest -> Handler CeremonyResponse
 createCeremony AppEnv{..} req = do
+  -- Method-specific parameter validation (protocol Section 3)
+  case validateMethodParams (crqEntropyMethod req) (crqRevealDeadline req) (crqNonParticipationPolicy req) of
+    Left msg -> throwError err400 { errBody = LBS.fromStrict (TE.encodeUtf8 msg) }
+    Right () -> pure ()
+
+  -- Two-party safety check
+  case validateTwoPartySafety (crqRequiredParties req) (crqNonParticipationPolicy req) of
+    Left msg -> throwError err400 { errBody = LBS.fromStrict (TE.encodeUtf8 msg) }
+    Right () -> pure ()
+
   now <- liftIO getCurrentTime
   cid <- liftIO UUID4.nextRandom
   let ceremony = Ceremony
@@ -78,8 +89,40 @@ createCeremony AppEnv{..} req = do
         }
   liftIO $ withConnection envPool $ \conn -> do
     Q.insertCeremony conn ceremony
-    appendAuditLog conn (CeremonyId cid) (CeremonyCreated ceremony)
+    Q.appendAuditLog conn (CeremonyId cid) (CeremonyCreated ceremony)
   pure $ ceremonyToResponse ceremony 0
+
+-- | Reject DefaultSubstitution for 2-party ceremonies.
+-- With only 2 parties, if one doesn't reveal, the remaining party knows both
+-- their own entropy and the deterministic default, giving them full control.
+validateTwoPartySafety :: Natural -> Maybe NonParticipationPolicy -> Either Text ()
+validateTwoPartySafety requiredParties (Just DefaultSubstitution)
+  | requiredParties == 2 = Left "DefaultSubstitution is not allowed for 2-party ceremonies: one party would control the outcome"
+validateTwoPartySafety _ _ = Right ()
+
+-- | Validate that reveal_deadline and non_participation_policy are consistent
+-- with the entropy method. Per protocol Section 3, these are "Methods A and D only."
+validateMethodParams :: EntropyMethod -> Maybe UTCTime -> Maybe NonParticipationPolicy -> Either Text ()
+validateMethodParams method mRevealDeadline mPolicy = case method of
+  ParticipantReveal -> requireRevealParams
+  Combined          -> requireRevealParams
+  ExternalBeacon    -> rejectRevealParams
+  OfficiantVRF      -> rejectRevealParams
+  where
+    requireRevealParams = do
+      case mRevealDeadline of
+        Nothing -> Left "reveal_deadline is required for ParticipantReveal and Combined methods"
+        Just _  -> Right ()
+      case mPolicy of
+        Nothing -> Left "non_participation_policy is required for ParticipantReveal and Combined methods"
+        Just _  -> Right ()
+    rejectRevealParams = do
+      case mRevealDeadline of
+        Just _  -> Left "reveal_deadline is only for ParticipantReveal and Combined methods"
+        Nothing -> Right ()
+      case mPolicy of
+        Just _  -> Left "non_participation_policy is only for ParticipantReveal and Combined methods"
+        Nothing -> Right ()
 
 getCeremonyH :: AppEnv -> UUID -> Handler CeremonyResponse
 getCeremonyH AppEnv{..} cid = do
@@ -108,9 +151,9 @@ commitToCeremony AppEnv{..} cid req = do
       case mrow of
         Nothing -> pure (Left err404)
         Just row -> do
-          let ceremony = ceremonyRowToDomain row
+          let ceremony = Q.ceremonyRowToDomain row
               pid = ParticipantId (cmrqParticipantId req)
-          commitments <- map commitmentRowToDomain <$> Q.getCommitments conn' (CeremonyId cid)
+          commitments <- map Q.commitmentRowToDomain <$> Q.getCommitments conn' (CeremonyId cid)
 
           let commit = Commitment
                 { commitCeremony = CeremonyId cid
@@ -125,7 +168,7 @@ commitToCeremony AppEnv{..} cid req = do
             Right TransitionResult{..} -> do
               Q.insertCommitment conn' commit
               Q.updateCeremonyPhase conn' (CeremonyId cid) trNewPhase
-              appendAuditLog conn' (CeremonyId cid) (ParticipantCommitted commit)
+              Q.appendAuditLog conn' (CeremonyId cid) (ParticipantCommitted commit)
 
               -- For Method C (VRF), if we've entered Resolving, generate VRF and resolve
               when (trNewPhase == Resolving && entropyMethod ceremony == OfficiantVRF) $ do
@@ -136,11 +179,11 @@ commitToCeremony AppEnv{..} cid req = do
                       , ecValue = vrfValue vrfOut
                       }
                     outcome = resolve (ceremonyType ceremony) [contribution]
-                appendAuditLog conn' (CeremonyId cid) (VRFGenerated vrfOut)
+                Q.appendAuditLog conn' (CeremonyId cid) (VRFGenerated vrfOut)
                 Q.insertOutcome conn' (CeremonyId cid) outcome
                 Q.updateCeremonyPhase conn' (CeremonyId cid) Finalized
-                appendAuditLog conn' (CeremonyId cid) (CeremonyResolved outcome)
-                appendAuditLog conn' (CeremonyId cid) CeremonyFinalized
+                Q.appendAuditLog conn' (CeremonyId cid) (CeremonyResolved outcome)
+                Q.appendAuditLog conn' (CeremonyId cid) CeremonyFinalized
 
               pure (Right $ CommitResponse
                 { cmrStatus = "committed"
@@ -159,23 +202,40 @@ revealEntropy AppEnv{..} cid req = do
       case mrow of
         Nothing -> pure (Left err404)
         Just row -> do
-          let ceremony = ceremonyRowToDomain row
+          let ceremony = Q.ceremonyRowToDomain row
               pid = ParticipantId (rvrqParticipantId req)
               val = TE.encodeUtf8 (rvrqEntropyValue req)
 
           if phase ceremony /= AwaitingReveals
             then pure (Left $ err400 { errBody = "Ceremony not in AwaitingReveals phase" })
             else do
-              commitments <- map commitmentRowToDomain <$> Q.getCommitments conn' (CeremonyId cid)
-              revealedPids <- Q.getRevealedParticipants conn' (CeremonyId cid)
+              commitments <- map Q.commitmentRowToDomain <$> Q.getCommitments conn' (CeremonyId cid)
 
-              case transition ceremony commitments revealedPids (SubmitReveal pid val) of
-                Left err -> pure (Left $ err400 { errBody = LBS.fromStrict (BS8.pack (show err)) })
-                Right TransitionResult{..} -> do
-                  Q.insertEntropyReveal conn' (CeremonyId cid) pid val False
-                  Q.updateCeremonyPhase conn' (CeremonyId cid) trNewPhase
-                  appendAuditLog conn' (CeremonyId cid) (EntropyRevealed pid val)
-                  pure (Right $ RevealResponse { rvrsStatus = "accepted" })
+              -- Seal verification: look up this participant's commitment
+              case find (\c -> commitParty c == pid) commitments of
+                Nothing ->
+                  pure (Left $ err400 { errBody = LBS.fromStrict (BS8.pack (show (NotCommitted pid))) })
+                Just commit -> case entropySealHash commit of
+                  Just seal
+                    | not (verifySealForReveal (CeremonyId cid) pid val seal) ->
+                        pure (Left $ err400 { errBody = LBS.fromStrict (BS8.pack (show (SealMismatch pid))) })
+                  _ -> do
+                    revealedPids <- Q.getRevealedParticipants conn' (CeremonyId cid)
+
+                    case transition ceremony commitments revealedPids (SubmitReveal pid val) of
+                      Left err -> pure (Left $ err400 { errBody = LBS.fromStrict (BS8.pack (show err)) })
+                      Right TransitionResult{..} -> do
+                        Q.insertEntropyReveal conn' (CeremonyId cid) pid val False
+                        Q.updateCeremonyPhase conn' (CeremonyId cid) trNewPhase
+
+                        -- Reveal batching: only log when phase transitions away from AwaitingReveals
+                        when (trNewPhase /= AwaitingReveals) $ do
+                          Q.markRevealsPublished conn' (CeremonyId cid)
+                          reveals <- Q.getEntropyReveals conn' (CeremonyId cid)
+                          let contributions = Q.revealsToContributions (CeremonyId cid) reveals
+                          Q.appendAuditLog conn' (CeremonyId cid) (RevealsPublished contributions)
+
+                        pure (Right $ RevealResponse { rvrsStatus = "accepted" })
 
   case result of
     Left err -> throwError err
@@ -250,30 +310,6 @@ healthCheck = pure HealthResponse
 
 -- === Helpers ===
 
-appendAuditLog :: Connection -> CeremonyId -> CeremonyEvent -> IO ()
-appendAuditLog conn cid event = do
-  now <- getCurrentTime
-  mlast <- Q.getLastAuditLogEntry conn cid
-  let prevHash = maybe genesisHash Q.alrEntryHash mlast
-      seqNum = maybe 0 (\e -> Q.alrSequenceNum e + 1) mlast
-      entry = createLogEntry (LogSequence (fromIntegral seqNum)) cid event now prevHash
-  Q.insertAuditLogEntry conn cid (eventTypeName event) (toJSON event) prevHash (logEntryHash entry)
-
-eventTypeName :: CeremonyEvent -> Text
-eventTypeName = \case
-  CeremonyCreated{}          -> "ceremony_created"
-  ParticipantCommitted{}     -> "participant_committed"
-  EntropyRevealed{}          -> "entropy_revealed"
-  RevealsPublished{}         -> "reveals_published"
-  NonParticipationApplied{}  -> "non_participation_applied"
-  BeaconAnchored{}           -> "beacon_anchored"
-  VRFGenerated{}             -> "vrf_generated"
-  CeremonyResolved{}         -> "ceremony_resolved"
-  CeremonyFinalized          -> "ceremony_finalized"
-  CeremonyExpired            -> "ceremony_expired"
-  CeremonyCancelled{}        -> "ceremony_cancelled"
-  CeremonyDisputed{}         -> "ceremony_disputed"
-
 ceremonyToResponse :: Ceremony -> Int -> CeremonyResponse
 ceremonyToResponse c count = CeremonyResponse
   { crspId = unCeremonyId (ceremonyId c)
@@ -294,37 +330,7 @@ ceremonyToResponse c count = CeremonyResponse
 
 ceremonyRowToResponse :: Q.CeremonyRow -> Int -> CeremonyResponse
 ceremonyRowToResponse row count =
-  ceremonyToResponse (ceremonyRowToDomain row) count
-
-ceremonyRowToDomain :: Q.CeremonyRow -> Ceremony
-ceremonyRowToDomain Q.CeremonyRow{..} = Ceremony
-  { ceremonyId = CeremonyId crId
-  , question = crQuestion
-  , ceremonyType = case Aeson.fromJSON crCeremonyType of
-      Aeson.Success ct -> ct
-      _                -> CoinFlip
-  , entropyMethod = parseEntropyMethod crEntropyMethod
-  , requiredParties = fromIntegral crRequiredParties
-  , commitmentMode = parseCommitmentMode crCommitmentMode
-  , commitDeadline = crCommitDeadline
-  , revealDeadline = crRevealDeadline
-  , nonParticipationPolicy = fmap parseNonParticipationPolicy crNonParticipationPolicy
-  , beaconSpec = crBeaconSpec >>= \v -> case Aeson.fromJSON v of
-      Aeson.Success bs -> Just bs
-      _                -> Nothing
-  , phase = parsePhase crPhase
-  , createdBy = ParticipantId crCreatedBy
-  , createdAt = crCreatedAt
-  }
-
-commitmentRowToDomain :: Q.CommitmentRow -> Commitment
-commitmentRowToDomain Q.CommitmentRow{..} = Commitment
-  { commitCeremony = CeremonyId cmrCeremonyId
-  , commitParty = ParticipantId cmrParticipantId
-  , commitSignature = cmrSignature
-  , entropySealHash = cmrEntropySeal
-  , committedAt = cmrCommittedAt
-  }
+  ceremonyToResponse (Q.ceremonyRowToDomain row) count
 
 auditLogRowToResponse :: Q.AuditLogRow -> AuditLogEntryResponse
 auditLogRowToResponse Q.AuditLogRow{..} = AuditLogEntryResponse
@@ -361,34 +367,3 @@ hexEncode = TE.decodeUtf8 . BS.concatMap (\w ->
     hexDigit n
       | n < 10    = n + 48  -- '0'
       | otherwise = n + 87  -- 'a'
-
-parsePhase :: Text -> Phase
-parsePhase = \case
-  "pending"          -> Pending
-  "awaiting_reveals" -> AwaitingReveals
-  "awaiting_beacon"  -> AwaitingBeacon
-  "resolving"        -> Resolving
-  "finalized"        -> Finalized
-  "expired"          -> Expired
-  "cancelled"        -> Cancelled
-  "disputed"         -> Disputed
-  _                  -> Pending
-
-parseEntropyMethod :: Text -> EntropyMethod
-parseEntropyMethod = \case
-  "participant_reveal" -> ParticipantReveal
-  "external_beacon"    -> ExternalBeacon
-  "officiant_vrf"      -> OfficiantVRF
-  "combined"           -> Combined
-  _                    -> OfficiantVRF
-
-parseCommitmentMode :: Text -> CommitmentMode
-parseCommitmentMode = \case
-  "deadline_wait" -> DeadlineWait
-  _               -> Immediate
-
-parseNonParticipationPolicy :: Text -> NonParticipationPolicy
-parseNonParticipationPolicy = \case
-  "default_substitution" -> DefaultSubstitution
-  "exclusion"            -> Exclusion
-  _                      -> Cancellation

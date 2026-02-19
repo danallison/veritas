@@ -9,13 +9,10 @@ import Test.Hspec
 import Test.Hspec.QuickCheck
 import Test.QuickCheck
 
+import TestHelpers ()
 import Veritas.Core.Types
 import Veritas.Core.Resolution
 import Veritas.Crypto.Hash (deriveUniform)
-
--- Arbitrary instances
-instance Arbitrary ByteString where
-  arbitrary = BS.pack <$> arbitrary
 
 spec :: Spec
 spec = do

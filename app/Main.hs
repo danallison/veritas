@@ -13,6 +13,7 @@ import Veritas.DB.Pool (createPool, withConnection)
 import Veritas.DB.Migrations (runMigrations)
 import Veritas.Workers.ExpiryChecker (runExpiryChecker)
 import Veritas.Workers.AutoResolver (runAutoResolver)
+import Veritas.Workers.RevealDeadlineChecker (runRevealDeadlineChecker)
 
 main :: IO ()
 main = do
@@ -42,7 +43,8 @@ main = do
 
   -- Start background workers
   withAsync (runExpiryChecker pool (workerExpiryInterval workerCfg)) $ \_ ->
-    withAsync (runAutoResolver pool keyPair (workerResolveInterval workerCfg)) $ \_ -> do
-      putStrLn "Background workers started"
-      putStrLn $ "Listening on port " ++ show (configPort config)
-      run (configPort config) (serve api (server env))
+    withAsync (runAutoResolver pool keyPair (workerResolveInterval workerCfg)) $ \_ ->
+      withAsync (runRevealDeadlineChecker pool (workerRevealInterval workerCfg)) $ \_ -> do
+        putStrLn "Background workers started"
+        putStrLn $ "Listening on port " ++ show (configPort config)
+        run (configPort config) (serve api (server env))

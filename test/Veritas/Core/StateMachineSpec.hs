@@ -216,6 +216,83 @@ spec = do
             trNewPhase `shouldBe` Disputed
           Left err -> expectationFailure $ "Expected success, got: " ++ show err
 
+    describe "ApplyNonParticipation" $ do
+      it "DefaultSubstitution transitions to Resolving (Method A)" $ do
+        now <- getCurrentTime
+        let ceremony = (mkCeremony ParticipantReveal Immediate 2 (futureTime now))
+              { phase = AwaitingReveals
+              , nonParticipationPolicy = Just DefaultSubstitution
+              }
+            commitments = [ mkCommitment testParticipant1 (Just "seal1") now
+                          , mkCommitment testParticipant2 (Just "seal2") now ]
+            entries = [ NonParticipationEntry
+                          { npeParticipant = testParticipant2
+                          , npePolicyApplied = DefaultSubstitution
+                          , npeSubstitutedValue = Just "default-val"
+                          }
+                      ]
+        case transition ceremony commitments [testParticipant1] (ApplyNonParticipation entries) of
+          Right TransitionResult{..} ->
+            trNewPhase `shouldBe` Resolving
+          Left err -> expectationFailure $ "Expected Resolving, got: " ++ show err
+
+      it "Cancellation transitions to Cancelled" $ do
+        now <- getCurrentTime
+        let ceremony = (mkCeremony ParticipantReveal Immediate 2 (futureTime now))
+              { phase = AwaitingReveals
+              , nonParticipationPolicy = Just Cancellation
+              }
+            commitments = [ mkCommitment testParticipant1 (Just "seal1") now
+                          , mkCommitment testParticipant2 (Just "seal2") now ]
+            entries = [ NonParticipationEntry
+                          { npeParticipant = testParticipant2
+                          , npePolicyApplied = Cancellation
+                          , npeSubstitutedValue = Nothing
+                          }
+                      ]
+        case transition ceremony commitments [testParticipant1] (ApplyNonParticipation entries) of
+          Right TransitionResult{..} ->
+            trNewPhase `shouldBe` Cancelled
+          Left err -> expectationFailure $ "Expected Cancelled, got: " ++ show err
+
+      it "Exclusion with Combined method transitions to AwaitingBeacon" $ do
+        now <- getCurrentTime
+        let ceremony = (mkCeremony Combined Immediate 2 (futureTime now))
+              { phase = AwaitingReveals
+              , nonParticipationPolicy = Just Exclusion
+              }
+            commitments = [ mkCommitment testParticipant1 (Just "seal1") now
+                          , mkCommitment testParticipant2 (Just "seal2") now ]
+            entries = [ NonParticipationEntry
+                          { npeParticipant = testParticipant2
+                          , npePolicyApplied = Exclusion
+                          , npeSubstitutedValue = Nothing
+                          }
+                      ]
+        case transition ceremony commitments [testParticipant1] (ApplyNonParticipation entries) of
+          Right TransitionResult{..} ->
+            trNewPhase `shouldBe` AwaitingBeacon
+          Left err -> expectationFailure $ "Expected AwaitingBeacon, got: " ++ show err
+
+      it "Exclusion with ParticipantReveal transitions to Resolving" $ do
+        now <- getCurrentTime
+        let ceremony = (mkCeremony ParticipantReveal Immediate 2 (futureTime now))
+              { phase = AwaitingReveals
+              , nonParticipationPolicy = Just Exclusion
+              }
+            commitments = [ mkCommitment testParticipant1 (Just "seal1") now
+                          , mkCommitment testParticipant2 (Just "seal2") now ]
+            entries = [ NonParticipationEntry
+                          { npeParticipant = testParticipant2
+                          , npePolicyApplied = Exclusion
+                          , npeSubstitutedValue = Nothing
+                          }
+                      ]
+        case transition ceremony commitments [testParticipant1] (ApplyNonParticipation entries) of
+          Right TransitionResult{..} ->
+            trNewPhase `shouldBe` Resolving
+          Left err -> expectationFailure $ "Expected Resolving, got: " ++ show err
+
     describe "isTerminal" $ do
       it "identifies terminal phases" $ do
         isTerminal Finalized `shouldBe` True
