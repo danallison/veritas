@@ -1,0 +1,105 @@
+cabal-version:      3.0
+name:               veritas
+version:            0.1.0.0
+synopsis:           Verifiable social randomness service
+license:            BSD-3-Clause
+build-type:         Simple
+
+common common-deps
+  default-language: GHC2021
+  default-extensions:
+    OverloadedStrings
+    DeriveGeneric
+    DerivingStrategies
+    GeneralizedNewtypeDeriving
+    LambdaCase
+    RecordWildCards
+    ScopedTypeVariables
+    TypeApplications
+    DataKinds
+    TypeOperators
+    DeriveAnyClass
+  ghc-options:
+    -Wall
+    -Wno-unused-do-bind
+  build-depends:
+    , base              >= 4.18  && < 5
+    , aeson             >= 2.1
+    , bytestring        >= 0.11
+    , text              >= 2.0
+    , time              >= 1.12
+    , uuid              >= 1.3
+    , containers        >= 0.6
+    , mtl               >= 2.3
+    , transformers      >= 0.6
+    , crypton           >= 0.34
+    , memory            >= 0.18
+    , servant           >= 0.20
+    , servant-server    >= 0.20
+    , warp              >= 3.3
+    , postgresql-simple >= 0.7
+    , resource-pool     >= 0.4
+    , async             >= 2.2
+    , http-conduit      >= 2.3
+    , http-types        >= 0.12
+    , wai               >= 3.2
+    , vector            >= 0.13
+
+library
+  import:           common-deps
+  hs-source-dirs:   src
+  exposed-modules:
+    Veritas.Core.Types
+    Veritas.Core.StateMachine
+    Veritas.Core.Resolution
+    Veritas.Core.Entropy
+    Veritas.Core.AuditLog
+    Veritas.Crypto.Hash
+    Veritas.Crypto.Signatures
+    Veritas.Crypto.CommitReveal
+    Veritas.Crypto.VRF
+    Veritas.API.Types
+    Veritas.API.Handlers
+    Veritas.API.Auth
+    Veritas.DB.Pool
+    Veritas.DB.Queries
+    Veritas.DB.Migrations
+    Veritas.Workers.ExpiryChecker
+    Veritas.Workers.AutoResolver
+    Veritas.External.Drand
+    Veritas.Config
+
+executable veritas
+  import:           common-deps
+  hs-source-dirs:   app
+  main-is:          Main.hs
+  build-depends:
+    , veritas
+  ghc-options:
+    -threaded
+    -rtsopts
+    "-with-rtsopts=-N"
+
+test-suite veritas-tests
+  import:           common-deps
+  type:             exitcode-stdio-1.0
+  hs-source-dirs:   test
+  main-is:          Spec.hs
+  build-depends:
+    , veritas
+    , hspec             >= 2.11
+    , QuickCheck        >= 2.14
+    , hspec-discover    >= 2.11
+  other-modules:
+    Veritas.Core.StateMachineSpec
+    Veritas.Core.ResolutionSpec
+    Veritas.Core.AuditLogSpec
+    Veritas.Crypto.HashSpec
+    Veritas.Crypto.CommitRevealSpec
+    Properties.StateMachineProperties
+    Properties.ResolutionProperties
+    Properties.AuditLogProperties
+  ghc-options:
+    -threaded
+    -rtsopts
+    "-with-rtsopts=-N"

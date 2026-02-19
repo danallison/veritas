@@ -1,0 +1,365 @@
+module Veritas.Core.Types
+  ( -- * Identifiers
+    CeremonyId(..)
+  , ParticipantId(..)
+  , LogSequence(..)
+
+    -- * Ceremony Configuration
+  , CommitmentMode(..)
+  , EntropyMethod(..)
+  , NonParticipationPolicy(..)
+  , CeremonyType(..)
+  , BeaconSpec(..)
+  , BeaconFallback(..)
+
+    -- * Phase
+  , Phase(..)
+
+    -- * Ceremony
+  , Ceremony(..)
+
+    -- * Commitment
+  , Commitment(..)
+
+    -- * Entropy
+  , EntropyContribution(..)
+  , EntropySource(..)
+  , BeaconAnchor(..)
+  , VRFOutput(..)
+
+    -- * Outcome
+  , Outcome(..)
+  , CeremonyResult(..)
+  , OutcomeProof(..)
+
+    -- * Audit Log
+  , CeremonyEvent(..)
+  , NonParticipationEntry(..)
+  , LogEntry(..)
+
+    -- * Errors
+  , TransitionError(..)
+  ) where
+
+import Data.Aeson
+  ( FromJSON(..), ToJSON(..), Value(..)
+  , withObject, (.:), (.=), object
+  )
+import Data.Aeson.Types (Pair)
+import Data.ByteString (ByteString)
+import qualified Data.ByteString as BS
+import Data.Text (Text)
+import qualified Data.Text as T
+import Data.Time (UTCTime, NominalDiffTime)
+import Data.UUID (UUID)
+import Data.List.NonEmpty (NonEmpty)
+import GHC.Generics (Generic)
+import GHC.Natural (Natural)
+
+-- | Unique identifier for a ceremony
+newtype CeremonyId = CeremonyId { unCeremonyId :: UUID }
+  deriving newtype (Eq, Ord, Show, FromJSON, ToJSON)
+
+-- | Unique identifier for a participant
+newtype ParticipantId = ParticipantId { unParticipantId :: UUID }
+  deriving newtype (Eq, Ord, Show, FromJSON, ToJSON)
+
+-- | Sequence number within a ceremony's audit log
+newtype LogSequence = LogSequence { unLogSequence :: Natural }
+  deriving newtype (Eq, Ord, Show, Num, FromJSON, ToJSON)
+
+-- | When to transition from Pending after quorum is reached
+data CommitmentMode
+  = Immediate     -- ^ Proceed as soon as quorum is reached
+  | DeadlineWait  -- ^ Wait for commit deadline even if quorum is met early
+  deriving stock (Eq, Show, Generic)
+  deriving anyclass (FromJSON, ToJSON)
+
+-- | How entropy is sourced for a ceremony
+data EntropyMethod
+  = ParticipantReveal  -- ^ Method A: commit-reveal from participants
+  | ExternalBeacon     -- ^ Method B: external randomness beacon (drand)
+  | OfficiantVRF       -- ^ Method C: server-generated VRF
+  | Combined           -- ^ Method D: participant reveal + beacon
+  deriving stock (Eq, Show, Generic)
+  deriving anyclass (FromJSON, ToJSON)
+
+-- | Policy for participants who commit but don't reveal (Methods A, D)
+data NonParticipationPolicy
+  = DefaultSubstitution  -- ^ Use deterministic default value
+  | Exclusion            -- ^ Exclude from entropy combination
+  | Cancellation         -- ^ Cancel the entire ceremony
+  deriving stock (Eq, Show, Generic)
+  deriving anyclass (FromJSON, ToJSON)
+
+-- | The kind of random outcome to produce
+data CeremonyType
+  = CoinFlip
+  | UniformChoice (NonEmpty Text)
+  | Shuffle (NonEmpty Text)
+  | IntRange Int Int
+  | WeightedChoice (NonEmpty (Text, Rational))
+  deriving stock (Eq, Show, Generic)
+  deriving anyclass (FromJSON, ToJSON)
+
+-- | Specification for an external randomness beacon source
+data BeaconSpec = BeaconSpec
+  { beaconNetwork  :: Text
+  , beaconRound    :: Maybe Natural
+  , beaconFallback :: BeaconFallback
+  } deriving stock (Eq, Show, Generic)
+    deriving anyclass (FromJSON, ToJSON)
+
+-- | What to do if the beacon source fails
+data BeaconFallback
+  = ExtendDeadline NominalDiffTime
+  | AlternateSource BeaconSpec
+  | CancelCeremony
+  deriving stock (Eq, Show, Generic)
+  deriving anyclass (FromJSON, ToJSON)
+
+-- | Ceremony lifecycle phase
+data Phase
+  = Pending          -- ^ Accepting commitments
+  | AwaitingReveals  -- ^ Collecting entropy reveals (Methods A, D)
+  | AwaitingBeacon   -- ^ Waiting for external beacon value (Methods B, D)
+  | Resolving        -- ^ Computing outcome
+  | Finalized        -- ^ Outcome sealed
+  | Expired          -- ^ Commitment deadline passed without quorum
+  | Cancelled        -- ^ Aborted
+  | Disputed         -- ^ Verification failed
+  deriving stock (Eq, Show, Generic)
+  deriving anyclass (FromJSON, ToJSON)
+
+-- | A ceremony instance
+data Ceremony = Ceremony
+  { ceremonyId             :: CeremonyId
+  , question               :: Text
+  , ceremonyType           :: CeremonyType
+  , entropyMethod          :: EntropyMethod
+  , requiredParties        :: Natural
+  , commitmentMode         :: CommitmentMode
+  , commitDeadline         :: UTCTime
+  , revealDeadline         :: Maybe UTCTime
+  , nonParticipationPolicy :: Maybe NonParticipationPolicy
+  , beaconSpec             :: Maybe BeaconSpec
+  , phase                  :: Phase
+  , createdBy              :: ParticipantId
+  , createdAt              :: UTCTime
+  } deriving stock (Eq, Show, Generic)
+    deriving anyclass (FromJSON, ToJSON)
+
+-- | A participant's commitment to a ceremony
+data Commitment = Commitment
+  { commitCeremony  :: CeremonyId
+  , commitParty     :: ParticipantId
+  , commitSignature :: ByteString
+  , entropySealHash :: Maybe ByteString
+  , committedAt     :: UTCTime
+  } deriving stock (Eq, Show, Generic)
+
+instance ToJSON Commitment where
+  toJSON c = object
+    [ "commitCeremony"  .= commitCeremony c
+    , "commitParty"     .= commitParty c
+    , "commitSignature" .= bsToText (commitSignature c)
+    , "entropySealHash" .= fmap bsToText (entropySealHash c)
+    , "committedAt"     .= committedAt c
+    ]
+
+-- | A contribution of entropy to a ceremony
+data EntropyContribution = EntropyContribution
+  { ecCeremony :: CeremonyId
+  , ecSource   :: EntropySource
+  , ecValue    :: ByteString
+  } deriving stock (Eq, Show, Generic)
+
+instance ToJSON EntropyContribution where
+  toJSON ec = object
+    [ "ecCeremony" .= ecCeremony ec
+    , "ecSource"   .= ecSource ec
+    , "ecValue"    .= bsToText (ecValue ec)
+    ]
+
+-- | Where entropy came from
+data EntropySource
+  = ParticipantEntropy ParticipantId
+  | DefaultEntropy ParticipantId
+  | BeaconEntropy BeaconAnchor
+  | VRFEntropy VRFOutput
+  deriving stock (Eq, Show, Generic)
+
+instance ToJSON EntropySource where
+  toJSON = \case
+    ParticipantEntropy pid -> object ["tag" .= ("ParticipantEntropy" :: Text), "participant" .= pid]
+    DefaultEntropy pid     -> object ["tag" .= ("DefaultEntropy" :: Text), "participant" .= pid]
+    BeaconEntropy anchor   -> object ["tag" .= ("BeaconEntropy" :: Text), "anchor" .= anchor]
+    VRFEntropy vrf         -> object ["tag" .= ("VRFEntropy" :: Text), "vrf" .= vrf]
+
+-- | Anchored external beacon value
+data BeaconAnchor = BeaconAnchor
+  { baNetwork   :: Text
+  , baRound     :: Natural
+  , baValue     :: ByteString
+  , baSignature :: ByteString
+  , baFetchedAt :: UTCTime
+  } deriving stock (Eq, Show, Generic)
+
+instance ToJSON BeaconAnchor where
+  toJSON ba = object
+    [ "baNetwork"   .= baNetwork ba
+    , "baRound"     .= baRound ba
+    , "baValue"     .= bsToText (baValue ba)
+    , "baSignature" .= bsToText (baSignature ba)
+    , "baFetchedAt" .= baFetchedAt ba
+    ]
+
+instance FromJSON BeaconAnchor where
+  parseJSON = withObject "BeaconAnchor" $ \o -> BeaconAnchor
+    <$> o .: "baNetwork"
+    <*> o .: "baRound"
+    <*> (textToBS <$> o .: "baValue")
+    <*> (textToBS <$> o .: "baSignature")
+    <*> o .: "baFetchedAt"
+
+-- | VRF output with proof
+data VRFOutput = VRFOutput
+  { vrfValue     :: ByteString
+  , vrfProof     :: ByteString
+  , vrfPublicKey :: ByteString
+  } deriving stock (Eq, Show, Generic)
+
+instance ToJSON VRFOutput where
+  toJSON v = object
+    [ "vrfValue"     .= bsToText (vrfValue v)
+    , "vrfProof"     .= bsToText (vrfProof v)
+    , "vrfPublicKey" .= bsToText (vrfPublicKey v)
+    ]
+
+instance FromJSON VRFOutput where
+  parseJSON = withObject "VRFOutput" $ \o -> VRFOutput
+    <$> (textToBS <$> o .: "vrfValue")
+    <*> (textToBS <$> o .: "vrfProof")
+    <*> (textToBS <$> o .: "vrfPublicKey")
+
+-- | The computed outcome of a ceremony
+data Outcome = Outcome
+  { outcomeValue     :: CeremonyResult
+  , combinedEntropy  :: ByteString
+  , outcomeProof     :: OutcomeProof
+  } deriving stock (Eq, Show, Generic)
+
+instance ToJSON Outcome where
+  toJSON o = object
+    [ "outcomeValue"    .= outcomeValue o
+    , "combinedEntropy" .= bsToText (combinedEntropy o)
+    , "outcomeProof"    .= outcomeProof o
+    ]
+
+-- | The actual random result
+data CeremonyResult
+  = CoinFlipResult Bool
+  | ChoiceResult Text
+  | ShuffleResult [Text]
+  | IntRangeResult Int
+  | WeightedChoiceResult Text
+  deriving stock (Eq, Show, Generic)
+  deriving anyclass (FromJSON, ToJSON)
+
+-- | Proof that the outcome was derived correctly
+data OutcomeProof = OutcomeProof
+  { proofEntropyInputs :: [EntropyContribution]
+  , proofDerivation    :: Text
+  } deriving stock (Eq, Show, Generic)
+
+instance ToJSON OutcomeProof where
+  toJSON p = object
+    [ "proofEntropyInputs" .= proofEntropyInputs p
+    , "proofDerivation"    .= proofDerivation p
+    ]
+
+-- | Events recorded in the audit log
+data CeremonyEvent
+  = CeremonyCreated Ceremony
+  | ParticipantCommitted Commitment
+  | EntropyRevealed ParticipantId ByteString
+  | RevealsPublished [EntropyContribution]
+  | NonParticipationApplied NonParticipationEntry
+  | BeaconAnchored BeaconAnchor
+  | VRFGenerated VRFOutput
+  | CeremonyResolved Outcome
+  | CeremonyFinalized
+  | CeremonyExpired
+  | CeremonyCancelled Text
+  | CeremonyDisputed Text
+  deriving stock (Eq, Show, Generic)
+
+instance ToJSON CeremonyEvent where
+  toJSON = \case
+    CeremonyCreated c         -> tagged "CeremonyCreated" ["ceremony" .= c]
+    ParticipantCommitted c    -> tagged "ParticipantCommitted" ["commitment" .= c]
+    EntropyRevealed pid val   -> tagged "EntropyRevealed" ["participant" .= pid, "value" .= bsToText val]
+    RevealsPublished cs       -> tagged "RevealsPublished" ["contributions" .= cs]
+    NonParticipationApplied e -> tagged "NonParticipationApplied" ["entry" .= e]
+    BeaconAnchored a          -> tagged "BeaconAnchored" ["anchor" .= a]
+    VRFGenerated v            -> tagged "VRFGenerated" ["vrf" .= v]
+    CeremonyResolved o        -> tagged "CeremonyResolved" ["outcome" .= o]
+    CeremonyFinalized         -> tagged "CeremonyFinalized" []
+    CeremonyExpired           -> tagged "CeremonyExpired" []
+    CeremonyCancelled reason  -> tagged "CeremonyCancelled" ["reason" .= reason]
+    CeremonyDisputed reason   -> tagged "CeremonyDisputed" ["reason" .= reason]
+    where
+      tagged :: Text -> [Pair] -> Value
+      tagged tag fields = object (("tag" .= tag) : fields)
+
+-- | Record of non-participation and how it was handled
+data NonParticipationEntry = NonParticipationEntry
+  { npeParticipant      :: ParticipantId
+  , npePolicyApplied    :: NonParticipationPolicy
+  , npeSubstitutedValue :: Maybe ByteString
+  } deriving stock (Eq, Show, Generic)
+
+instance ToJSON NonParticipationEntry where
+  toJSON e = object
+    [ "npeParticipant"      .= npeParticipant e
+    , "npePolicyApplied"    .= npePolicyApplied e
+    , "npeSubstitutedValue" .= fmap bsToText (npeSubstitutedValue e)
+    ]
+
+-- | An entry in the per-ceremony audit log
+data LogEntry = LogEntry
+  { logSequence  :: LogSequence
+  , logCeremony  :: CeremonyId
+  , logEvent     :: CeremonyEvent
+  , logTimestamp  :: UTCTime
+  , logPrevHash  :: ByteString
+  , logEntryHash :: ByteString
+  } deriving stock (Eq, Show, Generic)
+
+-- | Errors that can occur during state transitions
+data TransitionError
+  = InvalidPhase Phase Phase
+  | QuorumNotReached Natural Natural
+  | DeadlineNotPassed UTCTime UTCTime
+  | DeadlinePassed UTCTime UTCTime
+  | AlreadyCommitted ParticipantId
+  | NotCommitted ParticipantId
+  | AlreadyRevealed ParticipantId
+  | SealMismatch ParticipantId
+  | MethodMismatch EntropyMethod
+  | MissingRevealDeadline
+  | MissingBeaconSpec
+  | InvariantViolation Text
+  deriving stock (Eq, Show, Generic)
+
+-- | Helper: encode ByteString as hex text for JSON
+bsToText :: ByteString -> Text
+bsToText = T.pack . concatMap (\w -> [hexChar (w `div` 16), hexChar (w `mod` 16)]) . BS.unpack
+  where
+    hexChar n
+      | n < 10    = toEnum (fromIntegral n + fromEnum '0')
+      | otherwise = toEnum (fromIntegral n - 10 + fromEnum 'a')
+
+-- | Helper: decode text to ByteString (simplified for Phase 1; use proper hex decode for production)
+textToBS :: Text -> ByteString
+textToBS t = BS.pack (map (fromIntegral . fromEnum) (T.unpack t))

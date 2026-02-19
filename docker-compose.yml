@@ -1,0 +1,44 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: veritas
+      POSTGRES_USER: veritas
+      POSTGRES_PASSWORD: veritas
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U veritas"]
+      interval: 2s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      VERITAS_PORT: "8080"
+      VERITAS_DB: "host=db port=5432 dbname=veritas user=veritas password=veritas"
+    ports:
+      - "8080:8080"
+
+  # Dev container for building/testing without running the server
+  dev:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      VERITAS_DB: "host=db port=5432 dbname=veritas user=veritas password=veritas"
+    entrypoint: ["sleep", "infinity"]
+    volumes:
+      - .:/app
+      - cabal-store:/root/.cabal/store
+
+volumes:
+  pgdata:
+  cabal-store:
