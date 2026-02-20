@@ -22,6 +22,10 @@ data Config = Config
   , configServerKeyPath :: Maybe FilePath
   , configWorkers     :: WorkerConfig
   , configDrand       :: DrandConfig
+  , configRateLimit   :: Int            -- ^ Max requests per window (from VERITAS_RATE_LIMIT)
+  , configRateWindow  :: Int            -- ^ Rate limit window in seconds (from VERITAS_RATE_WINDOW)
+  , configTLSCert     :: Maybe FilePath -- ^ TLS certificate path (from VERITAS_TLS_CERT)
+  , configTLSKey      :: Maybe FilePath -- ^ TLS key path (from VERITAS_TLS_KEY)
   } deriving stock (Show, Generic)
 
 -- | Configuration for the drand external randomness beacon
@@ -48,6 +52,10 @@ loadConfig = do
   keyPath <- lookupEnv "VERITAS_SERVER_KEY"
   relayUrl <- maybe defaultDrandRelay T.pack <$> lookupEnv "VERITAS_DRAND_RELAY_URL"
   chainHash <- maybe defaultDrandChainHash T.pack <$> lookupEnv "VERITAS_DRAND_CHAIN_HASH"
+  rateLimit <- maybe 60 read <$> lookupEnv "VERITAS_RATE_LIMIT"
+  rateWindow <- maybe 60 read <$> lookupEnv "VERITAS_RATE_WINDOW"
+  tlsCert <- lookupEnv "VERITAS_TLS_CERT"
+  tlsKey <- lookupEnv "VERITAS_TLS_KEY"
   pure Config
     { configPort = port
     , configDBConnStr = dbStr
@@ -58,6 +66,10 @@ loadConfig = do
         { drandRelayUrl = relayUrl
         , drandChainHash = chainHash
         }
+    , configRateLimit = rateLimit
+    , configRateWindow = rateWindow
+    , configTLSCert = tlsCert
+    , configTLSKey = tlsKey
     }
 
 defaultDBStr :: ByteString
@@ -91,4 +103,8 @@ defaultConfig = Config
       { drandRelayUrl = defaultDrandRelay
       , drandChainHash = defaultDrandChainHash
       }
+  , configRateLimit = 60
+  , configRateWindow = 60
+  , configTLSCert = Nothing
+  , configTLSKey = Nothing
   }

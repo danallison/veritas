@@ -185,8 +185,8 @@ spec = do
 
       case transition ceremony0 [] [] (AddCommitment commit1) of
         Left err -> expectationFailure $ "Commit 1 failed: " ++ show err
-        Right TransitionResult{..} -> do
-          trNewPhase `shouldBe` Pending  -- 1/2
+        Right r1 -> do
+          trNewPhase r1 `shouldBe` Pending  -- 1/2
 
           -- Participant 2 commits with seal
           let entropy2 = "entropy-from-participant-2"
@@ -195,8 +195,8 @@ spec = do
 
           case transition ceremony0 [commit1] [] (AddCommitment commit2) of
             Left err -> expectationFailure $ "Commit 2 failed: " ++ show err
-            Right TransitionResult{..} -> do
-              trNewPhase `shouldBe` AwaitingReveals
+            Right r2 -> do
+              trNewPhase r2 `shouldBe` AwaitingReveals
 
               let ceremony1 = ceremony0 { phase = AwaitingReveals }
                   commitments = [commit1, commit2]
@@ -208,14 +208,14 @@ spec = do
               -- Participant 1 reveals
               case transition ceremony1 commitments [] (SubmitReveal testParticipant1 entropy1) of
                 Left err -> expectationFailure $ "Reveal 1 failed: " ++ show err
-                Right TransitionResult{..} -> do
-                  trNewPhase `shouldBe` AwaitingReveals  -- 1/2 revealed
+                Right r3 -> do
+                  trNewPhase r3 `shouldBe` AwaitingReveals  -- 1/2 revealed
 
                   -- Participant 2 reveals
                   case transition ceremony1 commitments [testParticipant1] (SubmitReveal testParticipant2 entropy2) of
                     Left err -> expectationFailure $ "Reveal 2 failed: " ++ show err
-                    Right TransitionResult{..} -> do
-                      trNewPhase `shouldBe` Resolving
+                    Right r4 -> do
+                      trNewPhase r4 `shouldBe` Resolving
 
                       -- Build contributions and resolve
                       let contributions = buildEntropyContributions testCeremonyId
@@ -265,8 +265,8 @@ spec = do
       -- After quorum, phase moves to AwaitingReveals
       case transition ceremony0 [commit1, commit2] [] (AddCommitment commit3) of
         Left err -> expectationFailure $ "Commit 3 failed: " ++ show err
-        Right TransitionResult{..} -> do
-          trNewPhase `shouldBe` AwaitingReveals
+        Right r1 -> do
+          trNewPhase r1 `shouldBe` AwaitingReveals
 
           let ceremony1 = ceremony0 { phase = AwaitingReveals }
 
@@ -284,8 +284,8 @@ spec = do
           case transition ceremony1 commitments [testParticipant1, testParticipant2, testParticipant3]
                  (ApplyNonParticipation entries) of
             Left err -> expectationFailure $ "ApplyNonParticipation failed: " ++ show err
-            Right TransitionResult{..} -> do
-              trNewPhase `shouldBe` Resolving
+            Right r2 -> do
+              trNewPhase r2 `shouldBe` Resolving
 
               -- Resolve with actual reveals + default
               let contributions = buildEntropyContributions testCeremonyId

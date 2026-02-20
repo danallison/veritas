@@ -11,6 +11,7 @@ import Control.Concurrent (threadDelay)
 import Control.Exception (try, SomeException)
 import Control.Monad (forever, forM_)
 import Data.Time (getCurrentTime)
+import Katip
 
 import Veritas.Core.Types
 import Veritas.Core.StateMachine (Action(..), TransitionResult(..), transition)
@@ -19,8 +20,8 @@ import Veritas.DB.Pool (DBPool, withConnection, withSerializableTransaction)
 import qualified Veritas.DB.Queries as Q
 
 -- | Run the reveal deadline checker in an infinite loop.
-runRevealDeadlineChecker :: DBPool -> Int -> IO ()
-runRevealDeadlineChecker pool intervalSeconds = forever $ do
+runRevealDeadlineChecker :: LogEnv -> DBPool -> Int -> IO ()
+runRevealDeadlineChecker logEnv pool intervalSeconds = forever $ do
   threadDelay (intervalSeconds * 1_000_000)
   now <- getCurrentTime
   result <- try @SomeException $ withConnection pool $ \conn -> do
@@ -47,7 +48,8 @@ runRevealDeadlineChecker pool intervalSeconds = forever $ do
                               | pid <- unrevealed
                               ]
                 case transition ceremony commitments revealedPids (ApplyNonParticipation entries) of
-                  Left _err -> pure ()
+                  Left tErr -> runKatipT logEnv $
+                    logMsg "worker.reveal_deadline" WarningS (showLS tErr)
                   Right TransitionResult{..} -> do
                     Q.updateCeremonyPhase conn' (CeremonyId cid) trNewPhase
                     mapM_ (Q.appendAuditLog conn' (CeremonyId cid)) trEvents
@@ -68,7 +70,8 @@ runRevealDeadlineChecker pool intervalSeconds = forever $ do
                 -- Update revealed list to include defaults
                 let allRevealedPids = revealedPids ++ unrevealed
                 case transition ceremony commitments allRevealedPids (ApplyNonParticipation entries) of
-                  Left _err -> pure ()
+                  Left tErr -> runKatipT logEnv $
+                    logMsg "worker.reveal_deadline" WarningS (showLS tErr)
                   Right TransitionResult{..} -> do
                     Q.updateCeremonyPhase conn' (CeremonyId cid) trNewPhase
                     mapM_ (Q.appendAuditLog conn' (CeremonyId cid)) trEvents
@@ -88,7 +91,8 @@ runRevealDeadlineChecker pool intervalSeconds = forever $ do
                               | pid <- unrevealed
                               ]
                 case transition ceremony commitments revealedPids (ApplyNonParticipation entries) of
-                  Left _err -> pure ()
+                  Left tErr -> runKatipT logEnv $
+                    logMsg "worker.reveal_deadline" WarningS (showLS tErr)
                   Right TransitionResult{..} -> do
                     Q.updateCeremonyPhase conn' (CeremonyId cid) trNewPhase
                     mapM_ (Q.appendAuditLog conn' (CeremonyId cid)) trEvents
@@ -101,5 +105,6 @@ runRevealDeadlineChecker pool intervalSeconds = forever $ do
               Nothing -> pure ()  -- no policy configured; skip
 
   case result of
-    Left _err -> pure ()  -- log error in production
-    Right ()  -> pure ()
+    Left err -> runKatipT logEnv $
+      logMsg "worker.reveal_deadline" ErrorS (showLS err)
+    Right () -> pure ()

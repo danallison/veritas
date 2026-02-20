@@ -5,20 +5,9 @@ import Test.Hspec
 import Test.Hspec.QuickCheck
 import Test.QuickCheck
 
+import TestHelpers ()
 import Veritas.Core.Types
 import Veritas.Core.StateMachine
-
--- Arbitrary instances
-
-instance Arbitrary Phase where
-  arbitrary = elements
-    [Pending, AwaitingReveals, AwaitingBeacon, Resolving, Finalized, Expired, Cancelled, Disputed]
-
-instance Arbitrary EntropyMethod where
-  arbitrary = elements [ParticipantReveal, ExternalBeacon, OfficiantVRF, Combined]
-
-instance Arbitrary CommitmentMode where
-  arbitrary = elements [Immediate, DeadlineWait]
 
 spec :: Spec
 spec = do

@@ -1,7 +1,9 @@
 -- | Servant API type definition and request/response types.
 module Veritas.API.Types
   ( VeritasAPI
+  , FullAPI
   , api
+  , fullApi
 
     -- * Request types
   , CreateCeremonyRequest(..)
@@ -24,6 +26,11 @@ module Veritas.API.Types
   ) where
 
 import Data.Aeson (FromJSON(..), ToJSON(..), Value, withObject, (.:), (.:?), object, (.=))
+import Control.Lens ((&), (.~), (?~))
+import qualified Data.HashMap.Strict.InsOrd as IOHM
+import qualified Data.OpenApi
+import Data.OpenApi (ToSchema(..))
+import qualified Data.OpenApi as OA
 import Data.Proxy (Proxy(..))
 import Data.Text (Text)
 import Data.Time (UTCTime)
@@ -57,6 +64,12 @@ type VeritasAPI =
 
 api :: Proxy VeritasAPI
 api = Proxy
+
+-- | Full API including the docs endpoint
+type FullAPI = VeritasAPI :<|> "docs" :> Get '[JSON] Data.OpenApi.OpenApi
+
+fullApi :: Proxy FullAPI
+fullApi = Proxy
 
 -- === Request types ===
 
@@ -341,3 +354,156 @@ instance ToJSON ServerPubKeyResponse where
 instance FromJSON ServerPubKeyResponse where
   parseJSON = withObject "ServerPubKeyResponse" $ \o -> ServerPubKeyResponse
     <$> o .: "public_key"
+
+-- === OpenAPI helpers ===
+
+-- | Build a properties map from a list of (name, schema) pairs
+props :: [(Text, OA.Schema)] -> IOHM.InsOrdHashMap Text (OA.Referenced OA.Schema)
+props = IOHM.fromList . map (fmap OA.Inline)
+
+-- === OpenAPI ToSchema instances ===
+
+instance ToSchema CreateCeremonyRequest where
+  declareNamedSchema _ = pure $ OA.NamedSchema (Just "CreateCeremonyRequest") $ mempty
+    & OA.type_ ?~ OA.OpenApiObject
+    & OA.description ?~ "Request to create a new randomness ceremony"
+    & OA.properties .~ props
+      [ ("question", mempty & OA.type_ ?~ OA.OpenApiString)
+      , ("ceremony_type", mempty & OA.description ?~ "CoinFlip | UniformChoice | Shuffle | IntRange | WeightedChoice")
+      , ("entropy_method", mempty & OA.type_ ?~ OA.OpenApiString & OA.description ?~ "ParticipantReveal | ExternalBeacon | OfficiantVRF | Combined")
+      , ("required_parties", mempty & OA.type_ ?~ OA.OpenApiInteger)
+      , ("commitment_mode", mempty & OA.type_ ?~ OA.OpenApiString & OA.description ?~ "Immediate | DeadlineWait")
+      , ("commit_deadline", mempty & OA.type_ ?~ OA.OpenApiString & OA.format ?~ "date-time")
+      , ("reveal_deadline", mempty & OA.type_ ?~ OA.OpenApiString & OA.format ?~ "date-time")
+      , ("non_participation_policy", mempty & OA.type_ ?~ OA.OpenApiString & OA.description ?~ "DefaultSubstitution | Exclusion | Cancellation")
+      , ("beacon_spec", mempty & OA.description ?~ "Beacon source configuration (required for ExternalBeacon/Combined)")
+      ]
+    & OA.required .~ ["question", "ceremony_type", "entropy_method", "required_parties", "commitment_mode", "commit_deadline"]
+
+instance ToSchema CommitRequest where
+  declareNamedSchema _ = pure $ OA.NamedSchema (Just "CommitRequest") $ mempty
+    & OA.type_ ?~ OA.OpenApiObject
+    & OA.properties .~ props
+      [ ("participant_id", mempty & OA.type_ ?~ OA.OpenApiString & OA.format ?~ "uuid")
+      , ("signature", mempty & OA.type_ ?~ OA.OpenApiString)
+      , ("entropy_seal", mempty & OA.type_ ?~ OA.OpenApiString & OA.description ?~ "SHA-256 seal of entropy (required for ParticipantReveal/Combined)")
+      ]
+    & OA.required .~ ["participant_id", "signature"]
+
+instance ToSchema RevealRequest where
+  declareNamedSchema _ = pure $ OA.NamedSchema (Just "RevealRequest") $ mempty
+    & OA.type_ ?~ OA.OpenApiObject
+    & OA.properties .~ props
+      [ ("participant_id", mempty & OA.type_ ?~ OA.OpenApiString & OA.format ?~ "uuid")
+      , ("entropy_value", mempty & OA.type_ ?~ OA.OpenApiString & OA.description ?~ "Hex-encoded entropy value matching the seal")
+      ]
+    & OA.required .~ ["participant_id", "entropy_value"]
+
+instance ToSchema CeremonyResponse where
+  declareNamedSchema _ = pure $ OA.NamedSchema (Just "CeremonyResponse") $ mempty
+    & OA.type_ ?~ OA.OpenApiObject
+    & OA.properties .~ props
+      [ ("id", mempty & OA.type_ ?~ OA.OpenApiString & OA.format ?~ "uuid")
+      , ("question", mempty & OA.type_ ?~ OA.OpenApiString)
+      , ("ceremony_type", mempty)
+      , ("entropy_method", mempty & OA.type_ ?~ OA.OpenApiString)
+      , ("required_parties", mempty & OA.type_ ?~ OA.OpenApiInteger)
+      , ("commitment_mode", mempty & OA.type_ ?~ OA.OpenApiString)
+      , ("commit_deadline", mempty & OA.type_ ?~ OA.OpenApiString & OA.format ?~ "date-time")
+      , ("reveal_deadline", mempty & OA.type_ ?~ OA.OpenApiString & OA.format ?~ "date-time")
+      , ("non_participation_policy", mempty & OA.type_ ?~ OA.OpenApiString)
+      , ("beacon_spec", mempty)
+      , ("phase", mempty & OA.type_ ?~ OA.OpenApiString & OA.description ?~ "Pending | AwaitingReveals | AwaitingBeacon | Resolving | Finalized | Expired | Cancelled | Disputed")
+      , ("created_by", mempty & OA.type_ ?~ OA.OpenApiString & OA.format ?~ "uuid")
+      , ("created_at", mempty & OA.type_ ?~ OA.OpenApiString & OA.format ?~ "date-time")
+      , ("commitment_count", mempty & OA.type_ ?~ OA.OpenApiInteger)
+      ]
+
+instance ToSchema CommitResponse where
+  declareNamedSchema _ = pure $ OA.NamedSchema (Just "CommitResponse") $ mempty
+    & OA.type_ ?~ OA.OpenApiObject
+    & OA.properties .~ props
+      [ ("status", mempty & OA.type_ ?~ OA.OpenApiString)
+      , ("phase", mempty & OA.type_ ?~ OA.OpenApiString)
+      ]
+
+instance ToSchema RevealResponse where
+  declareNamedSchema _ = pure $ OA.NamedSchema (Just "RevealResponse") $ mempty
+    & OA.type_ ?~ OA.OpenApiObject
+    & OA.properties .~ props
+      [ ("status", mempty & OA.type_ ?~ OA.OpenApiString)
+      ]
+
+instance ToSchema OutcomeResponse where
+  declareNamedSchema _ = pure $ OA.NamedSchema (Just "OutcomeResponse") $ mempty
+    & OA.type_ ?~ OA.OpenApiObject
+    & OA.properties .~ props
+      [ ("outcome", mempty & OA.description ?~ "The computed random result")
+      , ("combined_entropy", mempty & OA.type_ ?~ OA.OpenApiString & OA.description ?~ "Hex-encoded combined entropy")
+      , ("resolved_at", mempty & OA.type_ ?~ OA.OpenApiString & OA.format ?~ "date-time")
+      ]
+
+instance ToSchema AuditLogResponse where
+  declareNamedSchema _ = pure $ OA.NamedSchema (Just "AuditLogResponse") $ mempty
+    & OA.type_ ?~ OA.OpenApiObject
+    & OA.properties .~ props
+      [ ("entries", mempty & OA.type_ ?~ OA.OpenApiArray & OA.description ?~ "Array of audit log entries")
+      ]
+
+instance ToSchema AuditLogEntryResponse where
+  declareNamedSchema _ = pure $ OA.NamedSchema (Just "AuditLogEntryResponse") $ mempty
+    & OA.type_ ?~ OA.OpenApiObject
+    & OA.properties .~ props
+      [ ("sequence_num", mempty & OA.type_ ?~ OA.OpenApiInteger)
+      , ("event_type", mempty & OA.type_ ?~ OA.OpenApiString)
+      , ("event_data", mempty & OA.description ?~ "Event-specific data")
+      , ("prev_hash", mempty & OA.type_ ?~ OA.OpenApiString & OA.description ?~ "Hash of previous log entry")
+      , ("entry_hash", mempty & OA.type_ ?~ OA.OpenApiString & OA.description ?~ "Hash of this log entry")
+      , ("created_at", mempty & OA.type_ ?~ OA.OpenApiString & OA.format ?~ "date-time")
+      ]
+
+instance ToSchema VerifyResponse where
+  declareNamedSchema _ = pure $ OA.NamedSchema (Just "VerifyResponse") $ mempty
+    & OA.type_ ?~ OA.OpenApiObject
+    & OA.properties .~ props
+      [ ("valid", mempty & OA.type_ ?~ OA.OpenApiBoolean)
+      , ("errors", mempty & OA.type_ ?~ OA.OpenApiArray & OA.description ?~ "List of verification errors, if any")
+      ]
+
+instance ToSchema HealthResponse where
+  declareNamedSchema _ = pure $ OA.NamedSchema (Just "HealthResponse") $ mempty
+    & OA.type_ ?~ OA.OpenApiObject
+    & OA.properties .~ props
+      [ ("status", mempty & OA.type_ ?~ OA.OpenApiString)
+      , ("version", mempty & OA.type_ ?~ OA.OpenApiString)
+      ]
+
+instance ToSchema RandomCoinResponse where
+  declareNamedSchema _ = pure $ OA.NamedSchema (Just "RandomCoinResponse") $ mempty
+    & OA.type_ ?~ OA.OpenApiObject
+    & OA.properties .~ props
+      [ ("result", mempty & OA.type_ ?~ OA.OpenApiBoolean)
+      ]
+
+instance ToSchema RandomIntResponse where
+  declareNamedSchema _ = pure $ OA.NamedSchema (Just "RandomIntResponse") $ mempty
+    & OA.type_ ?~ OA.OpenApiObject
+    & OA.properties .~ props
+      [ ("result", mempty & OA.type_ ?~ OA.OpenApiInteger)
+      , ("min", mempty & OA.type_ ?~ OA.OpenApiInteger)
+      , ("max", mempty & OA.type_ ?~ OA.OpenApiInteger)
+      ]
+
+instance ToSchema RandomUUIDResponse where
+  declareNamedSchema _ = pure $ OA.NamedSchema (Just "RandomUUIDResponse") $ mempty
+    & OA.type_ ?~ OA.OpenApiObject
+    & OA.properties .~ props
+      [ ("result", mempty & OA.type_ ?~ OA.OpenApiString & OA.format ?~ "uuid")
+      ]
+
+instance ToSchema ServerPubKeyResponse where
+  declareNamedSchema _ = pure $ OA.NamedSchema (Just "ServerPubKeyResponse") $ mempty
+    & OA.type_ ?~ OA.OpenApiObject
+    & OA.properties .~ props
+      [ ("public_key", mempty & OA.type_ ?~ OA.OpenApiString & OA.description ?~ "Hex-encoded Ed25519 public key")
+      ]

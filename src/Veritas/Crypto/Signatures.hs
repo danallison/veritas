@@ -1,6 +1,7 @@
 module Veritas.Crypto.Signatures
   ( KeyPair(..)
   , generateKeyPair
+  , loadOrGenerateKeyPair
   , signMsg
   , verifyMsg
   , publicKeyBytes
@@ -11,6 +12,9 @@ import Crypto.Error (throwCryptoError)
 import qualified Crypto.PubKey.Ed25519 as Ed25519
 import Data.ByteArray (convert)
 import Data.ByteString (ByteString)
+import qualified Data.ByteString as BS
+import System.Directory (doesFileExist)
+import System.Posix.Files (setFileMode)
 
 data KeyPair = KeyPair
   { kpSecret :: Ed25519.SecretKey
@@ -22,6 +26,36 @@ generateKeyPair :: IO KeyPair
 generateKeyPair = do
   sk <- Ed25519.generateSecretKey
   let pk = Ed25519.toPublic sk
+  pure KeyPair { kpSecret = sk, kpPublic = pk }
+
+-- | Load a key pair from a file, or generate one and save it.
+-- If no path given, generate an ephemeral key (not persisted).
+loadOrGenerateKeyPair :: Maybe FilePath -> IO KeyPair
+loadOrGenerateKeyPair Nothing = generateKeyPair
+loadOrGenerateKeyPair (Just path) = do
+  exists <- doesFileExist path
+  if exists
+    then loadKeyPair path
+    else do
+      kp <- generateKeyPair
+      saveKeyPair path kp
+      pure kp
+
+-- | Save a key pair to a file (32 bytes secret ++ 32 bytes public).
+-- Sets file permissions to 0600.
+saveKeyPair :: FilePath -> KeyPair -> IO ()
+saveKeyPair path kp = do
+  let bytes = secretKeyBytes (kpSecret kp) <> publicKeyBytes (kpPublic kp)
+  BS.writeFile path bytes
+  setFileMode path 0o600
+
+-- | Load a key pair from a file (expects 64 bytes: 32 secret ++ 32 public).
+loadKeyPair :: FilePath -> IO KeyPair
+loadKeyPair path = do
+  bytes <- BS.readFile path
+  let (skBytes, pkBytes) = BS.splitAt 32 bytes
+      sk = throwCryptoError (Ed25519.secretKey skBytes)
+      pk = throwCryptoError (Ed25519.publicKey pkBytes)
   pure KeyPair { kpSecret = sk, kpPublic = pk }
 
 -- | Sign a message with a secret key

@@ -48,6 +48,8 @@ import Data.Aeson
 import Data.Aeson.Types (Pair)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
+import qualified Data.OpenApi
+import Data.OpenApi (ToSchema(..))
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Time (UTCTime, NominalDiffTime)
@@ -73,7 +75,7 @@ data CommitmentMode
   = Immediate     -- ^ Proceed as soon as quorum is reached
   | DeadlineWait  -- ^ Wait for commit deadline even if quorum is met early
   deriving stock (Eq, Show, Generic)
-  deriving anyclass (FromJSON, ToJSON)
+  deriving anyclass (FromJSON, ToJSON, ToSchema)
 
 -- | How entropy is sourced for a ceremony
 data EntropyMethod
@@ -82,7 +84,7 @@ data EntropyMethod
   | OfficiantVRF       -- ^ Method C: server-generated VRF
   | Combined           -- ^ Method D: participant reveal + beacon
   deriving stock (Eq, Show, Generic)
-  deriving anyclass (FromJSON, ToJSON)
+  deriving anyclass (FromJSON, ToJSON, ToSchema)
 
 -- | Policy for participants who commit but don't reveal (Methods A, D)
 data NonParticipationPolicy
@@ -90,7 +92,7 @@ data NonParticipationPolicy
   | Exclusion            -- ^ Exclude from entropy combination
   | Cancellation         -- ^ Cancel the entire ceremony
   deriving stock (Eq, Show, Generic)
-  deriving anyclass (FromJSON, ToJSON)
+  deriving anyclass (FromJSON, ToJSON, ToSchema)
 
 -- | The kind of random outcome to produce
 data CeremonyType
@@ -129,7 +131,7 @@ data Phase
   | Cancelled        -- ^ Aborted
   | Disputed         -- ^ Verification failed
   deriving stock (Eq, Show, Generic)
-  deriving anyclass (FromJSON, ToJSON)
+  deriving anyclass (FromJSON, ToJSON, ToSchema)
 
 -- | A ceremony instance
 data Ceremony = Ceremony
@@ -351,6 +353,17 @@ data TransitionError
   | MissingBeaconSpec
   | InvariantViolation Text
   deriving stock (Eq, Show, Generic)
+
+-- === OpenAPI schema instances for complex types ===
+
+instance ToSchema CeremonyType where
+  declareNamedSchema _ = pure $ Data.OpenApi.NamedSchema (Just "CeremonyType") mempty
+
+instance ToSchema BeaconSpec where
+  declareNamedSchema _ = pure $ Data.OpenApi.NamedSchema (Just "BeaconSpec") mempty
+
+instance ToSchema BeaconFallback where
+  declareNamedSchema _ = pure $ Data.OpenApi.NamedSchema (Just "BeaconFallback") mempty
 
 -- | Helper: encode ByteString as hex text for JSON
 bsToText :: ByteString -> Text

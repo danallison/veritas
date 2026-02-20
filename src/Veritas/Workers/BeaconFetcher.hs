@@ -9,6 +9,7 @@ import Control.Exception (try, SomeException)
 import Control.Monad (forever, forM_)
 import qualified Data.Aeson as Aeson
 import Data.Text (Text)
+import Katip
 
 import Veritas.Config (DrandConfig(..))
 import Veritas.Core.Types
@@ -19,8 +20,8 @@ import Veritas.External.Drand (fetchBeaconRound, fetchLatestBeacon, DrandError)
 
 -- | Run the beacon fetcher in an infinite loop.
 -- Picks up ceremonies in the AwaitingBeacon phase and fetches drand beacon values.
-runBeaconFetcher :: DBPool -> DrandConfig -> Int -> IO ()
-runBeaconFetcher pool drandCfg intervalSeconds = forever $ do
+runBeaconFetcher :: LogEnv -> DBPool -> DrandConfig -> Int -> IO ()
+runBeaconFetcher logEnv pool drandCfg intervalSeconds = forever $ do
   threadDelay (intervalSeconds * 1_000_000)
   result <- try @SomeException $ do
     -- Query for awaiting IDs, then release the connection before processing.
@@ -28,15 +29,16 @@ runBeaconFetcher pool drandCfg intervalSeconds = forever $ do
     -- the query connection during the loop would risk pool deadlock.
     awaitingIds <- withConnection pool Q.getAwaitingBeaconCeremonies
     forM_ awaitingIds $ \cid ->
-      processBeaconCeremony pool drandCfg (CeremonyId cid)
+      processBeaconCeremony logEnv pool drandCfg (CeremonyId cid)
   case result of
-    Left _err -> pure ()  -- log error in production
-    Right ()  -> pure ()
+    Left err -> runKatipT logEnv $
+      logMsg "worker.beacon" ErrorS (showLS err)
+    Right () -> pure ()
 
 -- | Process a single ceremony that is awaiting a beacon value.
 -- HTTP fetch happens outside the DB transaction to avoid holding the connection.
-processBeaconCeremony :: DBPool -> DrandConfig -> CeremonyId -> IO ()
-processBeaconCeremony pool drandCfg cid = do
+processBeaconCeremony :: LogEnv -> DBPool -> DrandConfig -> CeremonyId -> IO ()
+processBeaconCeremony logEnv pool drandCfg cid = do
   -- Read ceremony data (outside transaction — just a read)
   mSpec <- withConnection pool $ \conn -> do
     mrow <- Q.getCeremony conn cid
@@ -50,13 +52,13 @@ processBeaconCeremony pool drandCfg cid = do
 
   case mSpec of
     Nothing   -> pure ()  -- no beacon spec, skip
-    Just spec -> fetchAndAnchor pool drandCfg cid spec 0
+    Just spec -> fetchAndAnchor logEnv pool drandCfg cid spec 0
 
 -- | Fetch beacon and anchor it, handling fallback strategies.
 -- maxDepth prevents infinite recursion on AlternateSource chains.
-fetchAndAnchor :: DBPool -> DrandConfig -> CeremonyId -> BeaconSpec -> Int -> IO ()
-fetchAndAnchor pool drandCfg cid spec depth
-  | depth >= 3 = cancelCeremony pool cid "Beacon fallback chain exceeded maximum depth"
+fetchAndAnchor :: LogEnv -> DBPool -> DrandConfig -> CeremonyId -> BeaconSpec -> Int -> IO ()
+fetchAndAnchor logEnv pool drandCfg cid spec depth
+  | depth >= 3 = cancelCeremony logEnv pool cid "Beacon fallback chain exceeded maximum depth"
   | otherwise = do
       let chainHash = resolveChainHash drandCfg (beaconNetwork spec)
       beaconResult <- case beaconRound spec of
@@ -64,8 +66,8 @@ fetchAndAnchor pool drandCfg cid spec depth
         Nothing       -> fetchLatestBeacon drandCfg chainHash
 
       case beaconResult of
-        Right anchor -> anchorBeacon pool cid anchor
-        Left err     -> handleFallback pool drandCfg cid spec depth err
+        Right anchor -> anchorBeacon logEnv pool cid anchor
+        Left err     -> handleFallback logEnv pool drandCfg cid spec depth err
 
 -- | Resolve "default" network to the config's chain hash, otherwise use as-is
 resolveChainHash :: DrandConfig -> Text -> Text
@@ -74,19 +76,19 @@ resolveChainHash cfg network
   | otherwise            = network
 
 -- | Apply the fallback strategy when beacon fetch fails
-handleFallback :: DBPool -> DrandConfig -> CeremonyId -> BeaconSpec -> Int -> DrandError -> IO ()
-handleFallback pool drandCfg cid spec depth _err = case beaconFallback spec of
+handleFallback :: LogEnv -> DBPool -> DrandConfig -> CeremonyId -> BeaconSpec -> Int -> DrandError -> IO ()
+handleFallback logEnv pool drandCfg cid spec depth _err = case beaconFallback spec of
   ExtendDeadline _ ->
     -- Do nothing — the worker will retry on the next poll cycle
     pure ()
   AlternateSource altSpec ->
-    fetchAndAnchor pool drandCfg cid altSpec (depth + 1)
+    fetchAndAnchor logEnv pool drandCfg cid altSpec (depth + 1)
   CancelCeremony ->
-    cancelCeremony pool cid "Beacon fetch failed and fallback is CancelCeremony"
+    cancelCeremony logEnv pool cid "Beacon fetch failed and fallback is CancelCeremony"
 
 -- | Anchor a beacon value: insert it and run the state machine transition
-anchorBeacon :: DBPool -> CeremonyId -> BeaconAnchor -> IO ()
-anchorBeacon pool cid anchor = do
+anchorBeacon :: LogEnv -> DBPool -> CeremonyId -> BeaconAnchor -> IO ()
+anchorBeacon logEnv pool cid anchor = do
   result <- try @SomeException $ withConnection pool $ \conn ->
     withSerializableTransaction conn $ \conn' -> do
       mrow <- Q.getCeremony conn' cid
@@ -95,20 +97,22 @@ anchorBeacon pool cid anchor = do
         Just row -> do
           let ceremony = Q.ceremonyRowToDomain row
           case transition ceremony [] [] (AnchorBeacon anchor) of
-            Left _err -> pure ()  -- wrong phase or other error, skip
+            Left tErr -> runKatipT logEnv $
+              logMsg "worker.beacon.anchor" WarningS (showLS tErr)
             Right TransitionResult{..} -> do
               Q.insertBeaconAnchor conn' cid anchor
               Q.updateCeremonyPhase conn' cid trNewPhase
               Q.appendAuditLog conn' cid (BeaconAnchored anchor)
   case result of
-    Left _err -> pure ()  -- log error in production
-    Right ()  -> pure ()
+    Left err -> runKatipT logEnv $
+      logMsg "worker.beacon.anchor" ErrorS (showLS err)
+    Right () -> pure ()
 
 -- | Cancel a ceremony with a reason.
 -- Re-reads the ceremony inside the transaction to guard against races
 -- (e.g., beacon was anchored between poll and cancel).
-cancelCeremony :: DBPool -> CeremonyId -> Text -> IO ()
-cancelCeremony pool cid reason = do
+cancelCeremony :: LogEnv -> DBPool -> CeremonyId -> Text -> IO ()
+cancelCeremony logEnv pool cid reason = do
   result <- try @SomeException $ withConnection pool $ \conn ->
     withSerializableTransaction conn $ \conn' -> do
       mrow <- Q.getCeremony conn' cid
@@ -120,5 +124,6 @@ cancelCeremony pool cid reason = do
               Q.updateCeremonyPhase conn' cid Cancelled
               Q.appendAuditLog conn' cid (CeremonyCancelled reason)
   case result of
-    Left _err -> pure ()  -- log error in production
-    Right ()  -> pure ()
+    Left err -> runKatipT logEnv $
+      logMsg "worker.beacon.cancel" ErrorS (showLS err)
+    Right () -> pure ()

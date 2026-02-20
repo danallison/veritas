@@ -1,6 +1,7 @@
 -- | Servant request handlers for the Veritas API.
 module Veritas.API.Handlers
   ( server
+  , fullServer
   , AppEnv(..)
   , validateTwoPartySafety
   , validateMethodParams
@@ -32,12 +33,16 @@ import Veritas.Crypto.VRF (generateVRF)
 import Veritas.Crypto.Signatures (KeyPair(..), publicKeyBytes)
 import Veritas.DB.Pool (DBPool, withConnection, withSerializableTransaction)
 import qualified Veritas.DB.Queries as Q
+import Data.OpenApi (OpenApi)
+import Katip (LogEnv, logMsg, Severity(..), runKatipT, ls)
+import Servant.OpenApi (toOpenApi)
 import Veritas.API.Types
 
 -- | Application environment passed to all handlers
 data AppEnv = AppEnv
   { envPool      :: DBPool
   , envKeyPair   :: KeyPair
+  , envLogEnv    :: LogEnv
   }
 
 -- | Wire up all handlers to the API type
@@ -56,6 +61,14 @@ server env =
   :<|> randomUUID
   :<|> serverPubKey env
   :<|> healthCheck
+
+-- | Wire up all handlers including docs endpoint
+fullServer :: AppEnv -> Server FullAPI
+fullServer env = server env :<|> docsHandler
+
+-- | Serve the OpenAPI 3.0 JSON spec
+docsHandler :: Handler OpenApi
+docsHandler = pure $ toOpenApi api
 
 -- === Ceremony Lifecycle ===
 
@@ -93,9 +106,12 @@ createCeremony AppEnv{..} req = do
         , createdBy = ParticipantId UUID.nil  -- placeholder for Phase 1
         , createdAt = now
         }
-  liftIO $ withConnection envPool $ \conn -> do
-    Q.insertCeremony conn ceremony
-    Q.appendAuditLog conn (CeremonyId cid) (CeremonyCreated ceremony)
+  liftIO $ do
+    withConnection envPool $ \conn -> do
+      Q.insertCeremony conn ceremony
+      Q.appendAuditLog conn (CeremonyId cid) (CeremonyCreated ceremony)
+    runKatipT envLogEnv $
+      logMsg "api.ceremony" InfoS (ls ("Ceremony created: " <> UUID.toText cid))
   pure $ ceremonyToResponse ceremony 0
 
 -- | Reject DefaultSubstitution for 2-party ceremonies.
@@ -214,7 +230,10 @@ commitToCeremony AppEnv{..} cid req = do
 
   case result of
     Left err -> throwError err
-    Right resp -> pure resp
+    Right resp -> do
+      liftIO $ runKatipT envLogEnv $
+        logMsg "api.commit" InfoS (ls ("Commitment received for ceremony " <> show cid))
+      pure resp
 
 revealEntropy :: AppEnv -> UUID -> RevealRequest -> Handler RevealResponse
 revealEntropy AppEnv{..} cid req = do
@@ -261,7 +280,10 @@ revealEntropy AppEnv{..} cid req = do
 
   case result of
     Left err -> throwError err
-    Right resp -> pure resp
+    Right resp -> do
+      liftIO $ runKatipT envLogEnv $
+        logMsg "api.reveal" InfoS (ls ("Entropy revealed for ceremony " <> show cid))
+      pure resp
 
 getOutcomeH :: AppEnv -> UUID -> Handler OutcomeResponse
 getOutcomeH AppEnv{..} cid = do

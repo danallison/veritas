@@ -8,6 +8,7 @@ import Control.Exception (try, SomeException)
 import Control.Monad (forever, forM_)
 import qualified Data.Aeson as Aeson
 import Database.PostgreSQL.Simple (Connection)
+import Katip
 
 import Veritas.Core.Types
 import Veritas.Core.Resolution (resolve)
@@ -18,8 +19,8 @@ import qualified Veritas.DB.Queries as Q
 
 -- | Run the auto resolver in an infinite loop.
 -- Picks up ceremonies in the Resolving phase and computes outcomes.
-runAutoResolver :: DBPool -> KeyPair -> Int -> IO ()
-runAutoResolver pool keyPair intervalSeconds = forever $ do
+runAutoResolver :: LogEnv -> DBPool -> KeyPair -> Int -> IO ()
+runAutoResolver logEnv pool keyPair intervalSeconds = forever $ do
   threadDelay (intervalSeconds * 1_000_000)
   result <- try @SomeException $ withConnection pool $ \conn -> do
     resolvingIds <- Q.getResolvingCeremonies conn
@@ -39,8 +40,9 @@ runAutoResolver pool keyPair intervalSeconds = forever $ do
             Q.insertOutcome conn' (CeremonyId cid) outcome
             Q.updateCeremonyPhase conn' (CeremonyId cid) Finalized
   case result of
-    Left _err -> pure ()
-    Right ()  -> pure ()
+    Left err -> runKatipT logEnv $
+      logMsg "worker.resolver" ErrorS (showLS err)
+    Right () -> pure ()
 
 -- | Gather entropy contributions for a ceremony based on its method
 gatherEntropy :: Connection -> CeremonyId -> Q.CeremonyRow -> KeyPair -> IO [EntropyContribution]

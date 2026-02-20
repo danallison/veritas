@@ -7,6 +7,7 @@ import Control.Concurrent (threadDelay)
 import Control.Exception (try, SomeException)
 import Control.Monad (forever, forM_)
 import Data.Time (getCurrentTime)
+import Katip
 
 import Veritas.Core.Types (CeremonyId(..), Phase(..))
 import Veritas.DB.Pool (DBPool, withConnection, withSerializableTransaction)
@@ -14,8 +15,8 @@ import qualified Veritas.DB.Queries as Q
 
 -- | Run the expiry checker in an infinite loop.
 -- Checks for pending ceremonies past their commit deadline.
-runExpiryChecker :: DBPool -> Int -> IO ()
-runExpiryChecker pool intervalSeconds = forever $ do
+runExpiryChecker :: LogEnv -> DBPool -> Int -> IO ()
+runExpiryChecker logEnv pool intervalSeconds = forever $ do
   threadDelay (intervalSeconds * 1_000_000)
   now <- getCurrentTime
   result <- try @SomeException $ withConnection pool $ \conn -> do
@@ -43,5 +44,6 @@ runExpiryChecker pool intervalSeconds = forever $ do
                       _                    -> Resolving
                 Q.updateCeremonyPhase conn' (CeremonyId cid) nextPhase
   case result of
-    Left _err -> pure ()  -- log error in production
-    Right ()  -> pure ()
+    Left err -> runKatipT logEnv $
+      logMsg "worker.expiry" ErrorS (showLS err)
+    Right () -> pure ()
