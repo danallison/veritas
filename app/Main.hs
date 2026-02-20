@@ -5,6 +5,7 @@ import Control.Exception (bracket)
 import Network.Wai (Middleware)
 import Network.Wai.Handler.Warp (run, defaultSettings, setPort)
 import Network.Wai.Middleware.RequestLogger (logStdout)
+import Network.Wai.Middleware.Cors (cors, simpleCorsResourcePolicy, CorsResourcePolicy(..))
 import Servant (serve)
 
 import Veritas.API.Types (fullApi)
@@ -54,8 +55,12 @@ main = bracket initLogEnv closeLogEnv $ \logEnv -> do
     { rlMaxRequests = configRateLimit config
     , rlWindowSeconds = configRateWindow config
     }
+  let corsPolicy = const $ Just simpleCorsResourcePolicy
+        { corsRequestHeaders = ["Content-Type"]
+        , corsMethods = ["GET", "POST", "OPTIONS"]
+        }
   let middleware :: Middleware
-      middleware = logStdout . rateLimiter
+      middleware = logStdout . rateLimiter . cors corsPolicy
 
   let app = middleware (serve fullApi (fullServer env))
 

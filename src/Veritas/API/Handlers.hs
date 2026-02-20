@@ -17,6 +17,7 @@ import qualified Data.ByteString.Lazy as LBS
 import Data.List (find)
 import Data.Text (Text)
 import qualified Data.Text.Encoding as TE
+import Data.ByteArray.Encoding (Base(..), convertFromBase)
 import Data.Time (UTCTime, getCurrentTime)
 import Data.UUID (UUID)
 import qualified Data.UUID as UUID
@@ -112,7 +113,7 @@ createCeremony AppEnv{..} req = do
       Q.appendAuditLog conn (CeremonyId cid) (CeremonyCreated ceremony)
     runKatipT envLogEnv $
       logMsg "api.ceremony" InfoS (ls ("Ceremony created: " <> UUID.toText cid))
-  pure $ ceremonyToResponse ceremony 0
+  pure $ ceremonyToResponse ceremony 0 []
 
 -- | Reject DefaultSubstitution for 2-party ceremonies.
 -- With only 2 parties, if one doesn't reveal, the remaining party knows both
@@ -168,16 +169,21 @@ getCeremonyH AppEnv{..} cid = do
   case mrow of
     Nothing -> throwError err404
     Just row -> do
-      count <- liftIO $ withConnection envPool $ \conn -> Q.getCommitmentCount conn (CeremonyId cid)
-      pure $ ceremonyRowToResponse row count
+      (count, participants) <- liftIO $ withConnection envPool $ \conn -> do
+        c <- Q.getCommitmentCount conn (CeremonyId cid)
+        ps <- Q.getCommittedParticipants conn (CeremonyId cid)
+        pure (c, ps)
+      pure $ ceremonyRowToResponse row count participants
 
 listCeremoniesH :: AppEnv -> Maybe Text -> Handler [CeremonyResponse]
 listCeremoniesH AppEnv{..} phaseFilter = do
   rows <- liftIO $ withConnection envPool $ \conn -> Q.listCeremonies conn phaseFilter
   liftIO $ withConnection envPool $ \conn ->
     mapM (\row -> do
-      count <- Q.getCommitmentCount conn (CeremonyId (Q.crId row))
-      pure $ ceremonyRowToResponse row count
+      let cid = CeremonyId (Q.crId row)
+      count <- Q.getCommitmentCount conn cid
+      participants <- Q.getCommittedParticipants conn cid
+      pure $ ceremonyRowToResponse row count participants
     ) rows
 
 commitToCeremony :: AppEnv -> UUID -> CommitRequest -> Handler CommitResponse
@@ -197,14 +203,14 @@ commitToCeremony AppEnv{..} cid req = do
                 { commitCeremony = CeremonyId cid
                 , commitParty = pid
                 , commitSignature = TE.encodeUtf8 (cmrqSignature req)
-                , entropySealHash = fmap TE.encodeUtf8 (cmrqEntropySeal req)
+                , entropySealHash = cmrqEntropySeal req >>= hexDecode
                 , committedAt = now
                 }
 
           case transition ceremony commitments [] (AddCommitment commit) of
             Left err -> pure (Left $ err400 { errBody = LBS.fromStrict (BS8.pack (show err)) })
             Right TransitionResult{..} -> do
-              Q.insertCommitment conn' commit
+              Q.insertCommitment conn' commit (cmrqDisplayName req)
               Q.updateCeremonyPhase conn' (CeremonyId cid) trNewPhase
               Q.appendAuditLog conn' (CeremonyId cid) (ParticipantCommitted commit)
 
@@ -245,11 +251,13 @@ revealEntropy AppEnv{..} cid req = do
         Just row -> do
           let ceremony = Q.ceremonyRowToDomain row
               pid = ParticipantId (rvrqParticipantId req)
-              val = TE.encodeUtf8 (rvrqEntropyValue req)
 
-          if phase ceremony /= AwaitingReveals
-            then pure (Left $ err400 { errBody = "Ceremony not in AwaitingReveals phase" })
-            else do
+          case hexDecode (rvrqEntropyValue req) of
+            Nothing -> pure (Left $ err400 { errBody = "Invalid hex in entropy_value" })
+            Just val ->
+              if phase ceremony /= AwaitingReveals
+              then pure (Left $ err400 { errBody = "Ceremony not in AwaitingReveals phase" })
+              else do
               commitments <- map Q.commitmentRowToDomain <$> Q.getCommitments conn' (CeremonyId cid)
 
               -- Seal verification: look up this participant's commitment
@@ -354,8 +362,8 @@ healthCheck = pure HealthResponse
 
 -- === Helpers ===
 
-ceremonyToResponse :: Ceremony -> Int -> CeremonyResponse
-ceremonyToResponse c count = CeremonyResponse
+ceremonyToResponse :: Ceremony -> Int -> [Q.CommittedParticipant] -> CeremonyResponse
+ceremonyToResponse c count participants = CeremonyResponse
   { crspId = unCeremonyId (ceremonyId c)
   , crspQuestion = question c
   , crspCeremonyType = ceremonyType c
@@ -370,11 +378,18 @@ ceremonyToResponse c count = CeremonyResponse
   , crspCreatedBy = unParticipantId (createdBy c)
   , crspCreatedAt = createdAt c
   , crspCommitmentCount = count
+  , crspCommittedParticipants = map toParticipantResponse participants
   }
 
-ceremonyRowToResponse :: Q.CeremonyRow -> Int -> CeremonyResponse
-ceremonyRowToResponse row count =
-  ceremonyToResponse (Q.ceremonyRowToDomain row) count
+ceremonyRowToResponse :: Q.CeremonyRow -> Int -> [Q.CommittedParticipant] -> CeremonyResponse
+ceremonyRowToResponse row count participants =
+  ceremonyToResponse (Q.ceremonyRowToDomain row) count participants
+
+toParticipantResponse :: Q.CommittedParticipant -> CommittedParticipantResponse
+toParticipantResponse Q.CommittedParticipant{..} = CommittedParticipantResponse
+  { cprParticipantId = cpParticipantId
+  , cprDisplayName = cpDisplayName
+  }
 
 auditLogRowToResponse :: Q.AuditLogRow -> AuditLogEntryResponse
 auditLogRowToResponse Q.AuditLogRow{..} = AuditLogEntryResponse
@@ -401,6 +416,12 @@ generateRandomBytes = do
   u1 <- UUID4.nextRandom
   u2 <- UUID4.nextRandom
   pure $ sha256 (UUID.toASCIIBytes u1 <> UUID.toASCIIBytes u2)
+
+-- | Hex-decode a Text to ByteString, returning Nothing on invalid hex
+hexDecode :: Text -> Maybe ByteString
+hexDecode t = case convertFromBase Base16 (TE.encodeUtf8 t) of
+  Left _  -> Nothing
+  Right bs -> Just bs
 
 -- | Hex-encode a ByteString to Text
 hexEncode :: ByteString -> Text

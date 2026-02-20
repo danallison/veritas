@@ -10,6 +10,8 @@ module Veritas.DB.Queries
   , insertCommitment
   , getCommitments
   , getCommitmentCount
+  , getCommittedParticipants
+  , CommittedParticipant(..)
 
     -- * Entropy Reveals
   , insertEntropyReveal
@@ -130,23 +132,24 @@ updateCeremonyPhase conn (CeremonyId cid) newPhase = do
 
 -- === Commitments ===
 
-insertCommitment :: Connection -> Commitment -> IO ()
-insertCommitment conn Commitment{..} = do
+insertCommitment :: Connection -> Commitment -> Maybe Text -> IO ()
+insertCommitment conn Commitment{..} mDisplayName = do
   _ <- execute conn
-    "INSERT INTO commitments (ceremony_id, participant_id, signature, entropy_seal, committed_at) \
-    \VALUES (?, ?, ?, ?, ?)"
+    "INSERT INTO commitments (ceremony_id, participant_id, signature, entropy_seal, committed_at, display_name) \
+    \VALUES (?, ?, ?, ?, ?, ?)"
     ( unCeremonyId commitCeremony
     , unParticipantId commitParty
     , Binary commitSignature
     , fmap Binary entropySealHash
     , committedAt
+    , mDisplayName
     )
   pure ()
 
 getCommitments :: Connection -> CeremonyId -> IO [CommitmentRow]
 getCommitments conn (CeremonyId cid) =
   query conn
-    "SELECT ceremony_id, participant_id, signature, entropy_seal, committed_at \
+    "SELECT ceremony_id, participant_id, signature, entropy_seal, committed_at, display_name \
     \FROM commitments WHERE ceremony_id = ? ORDER BY committed_at"
     (Only cid)
 
@@ -156,6 +159,20 @@ getCommitmentCount conn (CeremonyId cid) = do
     "SELECT COUNT(*) FROM commitments WHERE ceremony_id = ?"
     (Only cid)
   pure n
+
+data CommittedParticipant = CommittedParticipant
+  { cpParticipantId :: UUID
+  , cpDisplayName   :: Maybe Text
+  } deriving stock (Show)
+
+instance FromRow CommittedParticipant where
+  fromRow = CommittedParticipant <$> field <*> field
+
+getCommittedParticipants :: Connection -> CeremonyId -> IO [CommittedParticipant]
+getCommittedParticipants conn (CeremonyId cid) =
+  query conn
+    "SELECT participant_id, display_name FROM commitments WHERE ceremony_id = ? ORDER BY committed_at"
+    (Only cid)
 
 -- === Entropy Reveals ===
 
@@ -313,10 +330,11 @@ data CommitmentRow = CommitmentRow
   , cmrSignature     :: ByteString
   , cmrEntropySeal   :: Maybe ByteString
   , cmrCommittedAt   :: UTCTime
+  , cmrDisplayName   :: Maybe Text
   } deriving stock (Show)
 
 instance FromRow CommitmentRow where
-  fromRow = CommitmentRow <$> field <*> field <*> field <*> field <*> field
+  fromRow = CommitmentRow <$> field <*> field <*> field <*> field <*> field <*> field
 
 data BeaconAnchorRow = BeaconAnchorRow
   { barNetwork   :: Text

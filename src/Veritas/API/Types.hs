@@ -12,6 +12,7 @@ module Veritas.API.Types
 
     -- * Response types
   , CeremonyResponse(..)
+  , CommittedParticipantResponse(..)
   , CommitResponse(..)
   , RevealResponse(..)
   , OutcomeResponse(..)
@@ -114,6 +115,7 @@ data CommitRequest = CommitRequest
   { cmrqParticipantId :: UUID
   , cmrqSignature     :: Text
   , cmrqEntropySeal   :: Maybe Text
+  , cmrqDisplayName   :: Maybe Text
   } deriving stock (Eq, Show, Generic)
 
 instance FromJSON CommitRequest where
@@ -121,12 +123,14 @@ instance FromJSON CommitRequest where
     <$> o .: "participant_id"
     <*> o .: "signature"
     <*> o .:? "entropy_seal"
+    <*> o .:? "display_name"
 
 instance ToJSON CommitRequest where
   toJSON r = object
     [ "participant_id" .= cmrqParticipantId r
     , "signature"      .= cmrqSignature r
     , "entropy_seal"   .= cmrqEntropySeal r
+    , "display_name"   .= cmrqDisplayName r
     ]
 
 data RevealRequest = RevealRequest
@@ -147,6 +151,22 @@ instance ToJSON RevealRequest where
 
 -- === Response types ===
 
+data CommittedParticipantResponse = CommittedParticipantResponse
+  { cprParticipantId :: UUID
+  , cprDisplayName   :: Maybe Text
+  } deriving stock (Eq, Show, Generic)
+
+instance ToJSON CommittedParticipantResponse where
+  toJSON r = object
+    [ "participant_id" .= cprParticipantId r
+    , "display_name"   .= cprDisplayName r
+    ]
+
+instance FromJSON CommittedParticipantResponse where
+  parseJSON = withObject "CommittedParticipantResponse" $ \o -> CommittedParticipantResponse
+    <$> o .: "participant_id"
+    <*> o .:? "display_name"
+
 data CeremonyResponse = CeremonyResponse
   { crspId                      :: UUID
   , crspQuestion                :: Text
@@ -162,6 +182,7 @@ data CeremonyResponse = CeremonyResponse
   , crspCreatedBy               :: UUID
   , crspCreatedAt               :: UTCTime
   , crspCommitmentCount         :: Int
+  , crspCommittedParticipants   :: [CommittedParticipantResponse]
   } deriving stock (Eq, Show, Generic)
 
 instance ToJSON CeremonyResponse where
@@ -180,6 +201,7 @@ instance ToJSON CeremonyResponse where
     , "created_by"               .= crspCreatedBy r
     , "created_at"               .= crspCreatedAt r
     , "commitment_count"         .= crspCommitmentCount r
+    , "committed_participants"   .= crspCommittedParticipants r
     ]
 
 instance FromJSON CeremonyResponse where
@@ -198,6 +220,7 @@ instance FromJSON CeremonyResponse where
     <*> o .: "created_by"
     <*> o .: "created_at"
     <*> o .: "commitment_count"
+    <*> o .: "committed_participants"
 
 data CommitResponse = CommitResponse
   { cmrStatus :: Text
@@ -387,6 +410,7 @@ instance ToSchema CommitRequest where
       [ ("participant_id", mempty & OA.type_ ?~ OA.OpenApiString & OA.format ?~ "uuid")
       , ("signature", mempty & OA.type_ ?~ OA.OpenApiString)
       , ("entropy_seal", mempty & OA.type_ ?~ OA.OpenApiString & OA.description ?~ "SHA-256 seal of entropy (required for ParticipantReveal/Combined)")
+      , ("display_name", mempty & OA.type_ ?~ OA.OpenApiString & OA.description ?~ "Optional display name for the participant")
       ]
     & OA.required .~ ["participant_id", "signature"]
 
@@ -417,6 +441,7 @@ instance ToSchema CeremonyResponse where
       , ("created_by", mempty & OA.type_ ?~ OA.OpenApiString & OA.format ?~ "uuid")
       , ("created_at", mempty & OA.type_ ?~ OA.OpenApiString & OA.format ?~ "date-time")
       , ("commitment_count", mempty & OA.type_ ?~ OA.OpenApiInteger)
+      , ("committed_participants", mempty & OA.type_ ?~ OA.OpenApiArray & OA.description ?~ "List of committed participants with optional display names")
       ]
 
 instance ToSchema CommitResponse where

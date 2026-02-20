@@ -46,8 +46,8 @@ A commitment is a signed statement from a party that says: "I agree to accept th
 The system supports multiple entropy strategies, which can be combined:
 
 - **Participant-contributed entropy** (commit-reveal scheme)
-- **External beacon entropy** (drand, NIST Randomness Beacon)
-- **Server-generated entropy** (VRF-based, for lower-stakes use cases)
+- **External beacon entropy** (drand)
+- **Server-generated entropy** (officiant VRF, for lower-stakes use cases)
 
 ### Audit Log
 
@@ -87,7 +87,7 @@ Every state transition in a ceremony is recorded in an append-only, hash-chained
 | Cryptography | `crypton` / `crypton-x509` | Maintained Haskell crypto library (successor to `cryptonite`) |
 | JSON | `aeson` | Standard Haskell JSON encoding/decoding |
 | Logging | `katip` | Structured logging with context |
-| Configuration | `dhall` | Type-safe configuration language |
+| Configuration | Environment variables | Simple, container-friendly |
 | Testing | `hspec` + `QuickCheck` | Property-based testing is critical for randomness protocols |
 | Build | `cabal` | Standard Haskell build tool |
 
@@ -96,55 +96,71 @@ Every state transition in a ceremony is recorded in an append-only, hash-chained
 ```
 veritas/
 ├── app/
-│   └── Main.hs                      -- Entry point, server startup
+│   └── Main.hs                      -- Entry point, server startup, TLS, worker threads
 ├── src/
 │   └── Veritas/
 │       ├── API/
-│       │   ├── Types.hs             -- Servant API type definition
+│       │   ├── Types.hs             -- Servant API type + request/response types + OpenAPI schemas
 │       │   ├── Handlers.hs          -- Request handlers
-│       │   └── Auth.hs              -- Authentication middleware
+│       │   ├── Auth.hs              -- Authentication middleware
+│       │   └── RateLimit.hs         -- Per-IP rate limiting middleware
 │       ├── Core/
-│       │   ├── Ceremony.hs          -- Ceremony state machine
-│       │   ├── Ceremony/
-│       │   │   ├── Types.hs         -- Ceremony, Phase, Outcome types
-│       │   │   ├── StateMachine.hs  -- Valid state transitions
-│       │   │   └── Resolution.hs    -- Deterministic outcome computation
-│       │   ├── Commitment.hs        -- Commitment creation and verification
+│       │   ├── Types.hs             -- All domain types (Phase, Ceremony, Commitment, Outcome, etc.)
+│       │   ├── StateMachine.hs      -- State transitions as pure functions
+│       │   ├── Resolution.hs        -- Deterministic outcome computation
 │       │   ├── Entropy.hs           -- Entropy collection and combination
-│       │   ├── Entropy/
-│       │   │   ├── ParticipantReveal.hs  -- Commit-reveal participant entropy
-│       │   │   ├── Beacon.hs             -- External beacon integration
-│       │   │   └── VRF.hs               -- Verifiable Random Function
-│       │   └── AuditLog.hs         -- Hash-chained append-only log
+│       │   └── AuditLog.hs          -- Hash-chained append-only log
 │       ├── Crypto/
-│       │   ├── Hash.hs             -- SHA-256 / BLAKE2b utilities
-│       │   ├── Signatures.hs       -- Ed25519 signing and verification
-│       │   ├── CommitReveal.hs     -- Commit-reveal scheme implementation
-│       │   └── VRF.hs              -- VRF implementation
+│       │   ├── Hash.hs              -- SHA-256 / BLAKE2b utilities
+│       │   ├── Signatures.hs        -- Ed25519 signing and verification
+│       │   ├── CommitReveal.hs      -- Commit-reveal scheme (seal/verify)
+│       │   └── VRF.hs               -- Verifiable Random Function
 │       ├── DB/
-│       │   ├── Pool.hs             -- Connection pool management
-│       │   ├── Ceremony.hs         -- Ceremony queries
-│       │   ├── Commitment.hs       -- Commitment queries
-│       │   ├── AuditLog.hs         -- Log entry queries
-│       │   └── Migrations.hs       -- Schema migrations
+│       │   ├── Pool.hs              -- Connection pool management
+│       │   ├── Queries.hs           -- All database queries (ceremonies, commitments, entropy, outcomes, log)
+│       │   └── Migrations.hs        -- Schema migrations
 │       ├── External/
-│       │   ├── Drand.hs            -- drand beacon client
-│       │   └── NIST.hs             -- NIST beacon client (optional)
-│       └── Config.hs               -- Application configuration
+│       │   └── Drand.hs             -- drand beacon client
+│       ├── Workers/
+│       │   ├── ExpiryChecker.hs     -- Expires pending ceremonies past deadline
+│       │   ├── AutoResolver.hs      -- Resolves ceremonies with collected entropy
+│       │   ├── BeaconFetcher.hs     -- Fetches drand beacon values
+│       │   └── RevealDeadlineChecker.hs -- Enforces reveal deadlines, applies non-participation policies
+│       ├── Config.hs                -- Environment-variable-based configuration
+│       └── Logging.hs              -- Katip structured logging setup
+├── web/                             -- React frontend (see below)
 ├── test/
 │   ├── Veritas/
 │   │   ├── Core/
-│   │   │   ├── CeremonySpec.hs
 │   │   │   ├── StateMachineSpec.hs
 │   │   │   ├── ResolutionSpec.hs
-│   │   │   └── EntropySpec.hs
+│   │   │   ├── RevealSpec.hs
+│   │   │   └── AuditLogSpec.hs
 │   │   ├── Crypto/
 │   │   │   ├── CommitRevealSpec.hs
-│   │   │   └── VRFSpec.hs
-│   │   └── AuditLogSpec.hs
-│   └── Properties/                  -- QuickCheck property tests
-│       ├── CeremonyProperties.hs
-│       └── EntropyProperties.hs
+│   │   │   └── HashSpec.hs
+│   │   └── External/
+│   │       └── DrandSpec.hs
+│   ├── Properties/
+│   │   ├── StateMachineProperties.hs
+│   │   ├── ResolutionProperties.hs
+│   │   ├── CommitRevealProperties.hs
+│   │   ├── AuditLogProperties.hs
+│   │   └── StatisticalProperties.hs
+│   ├── TestHelpers.hs
+│   └── Spec.hs
+├── web/
+│   └── src/
+│       ├── api/
+│       │   ├── client.ts            -- TypeScript API client
+│       │   └── types.ts             -- TypeScript type definitions
+│       ├── pages/                   -- Route pages (Home, Create, CeremonyDetail, RandomTools)
+│       ├── components/              -- UI components (CommitForm, RevealForm, OutcomeDisplay, AuditLog, etc.)
+│       ├── hooks/                   -- React hooks (useCeremony, useParticipant, useCeremonySecrets)
+│       └── context/                 -- React context (ParticipantContext)
+├── Dockerfile                       -- Development image
+├── Dockerfile.prod                  -- Multi-stage production image
+├── docker-compose.yml               -- Full stack: db, app, web, dev
 └── veritas.cabal
 ```
 
@@ -157,72 +173,97 @@ veritas/
 ```haskell
 -- Ceremony identity and metadata
 newtype CeremonyId = CeremonyId UUID
-  deriving (Eq, Ord, Show, ToJSON, FromJSON)
-
 newtype ParticipantId = ParticipantId UUID
-  deriving (Eq, Ord, Show, ToJSON, FromJSON)
-
 newtype LogSequence = LogSequence Natural
-  deriving (Eq, Ord, Show, ToJSON, FromJSON)
 
--- A ceremony progresses through phases linearly.
--- The type system enforces that transitions only go forward.
+-- Ceremony lifecycle phase
 data Phase
-  = Pending        -- Created, accepting commitments
-  | Committed      -- All parties committed, collecting entropy
-  | Resolving      -- Entropy collected, computing outcome
-  | Finalized      -- Outcome sealed, ceremony complete
-  | Expired        -- Deadline passed without sufficient commitments
-  | Disputed       -- A verification check failed (see Security section)
-  deriving (Eq, Ord, Show, Generic, ToJSON, FromJSON)
+  = Pending          -- Accepting commitments
+  | AwaitingReveals  -- Collecting entropy reveals (ParticipantReveal, Combined)
+  | AwaitingBeacon   -- Waiting for external beacon value (ExternalBeacon, Combined)
+  | Resolving        -- Computing outcome
+  | Finalized        -- Outcome sealed
+  | Expired          -- Commitment deadline passed without quorum
+  | Cancelled        -- Aborted (e.g. non-participation policy = Cancellation)
+  | Disputed         -- Verification failed
 
 data CeremonyType
-  = CoinFlip                           -- Heads or tails
-  | UniformChoice (NonEmpty Text)      -- Pick one from a list
-  | Shuffle (NonEmpty Text)            -- Random permutation
-  | IntRange Int Int                   -- Random integer in [lo, hi]
-  | WeightedChoice (NonEmpty (Text, Rational))  -- Weighted selection
-  deriving (Show, Generic, ToJSON, FromJSON)
+  = CoinFlip
+  | UniformChoice (NonEmpty Text)
+  | Shuffle (NonEmpty Text)
+  | IntRange Int Int
+  | WeightedChoice (NonEmpty (Text, Rational))
 
-data EntropyStrategy
-  = ParticipantReveal    -- Each participant contributes entropy via commit-reveal
-  | ExternalBeacon       -- Use drand or NIST beacon
-  | Combined             -- Participant entropy XORed with beacon entropy
-  | ServerVRF            -- Server generates via VRF (lower trust, simpler UX)
-  deriving (Show, Generic, ToJSON, FromJSON)
+-- How entropy is sourced (configurable per ceremony)
+data EntropyMethod
+  = ParticipantReveal  -- Commit-reveal from participants
+  | ExternalBeacon     -- External randomness beacon (drand)
+  | OfficiantVRF       -- Server-generated VRF
+  | Combined           -- Participant reveal + beacon
+
+-- When to transition from Pending after quorum is reached
+data CommitmentMode
+  = Immediate     -- Proceed as soon as quorum is reached
+  | DeadlineWait  -- Wait for commit deadline even if quorum is met early
+
+-- Policy for participants who commit but don't reveal (ParticipantReveal, Combined)
+data NonParticipationPolicy
+  = DefaultSubstitution  -- Use deterministic default value
+  | Exclusion            -- Exclude from entropy combination
+  | Cancellation         -- Cancel the entire ceremony
+
+-- Specification for an external randomness beacon source
+data BeaconSpec = BeaconSpec
+  { beaconNetwork  :: Text
+  , beaconRound    :: Maybe Natural
+  , beaconFallback :: BeaconFallback
+  }
+
+data BeaconFallback
+  = ExtendDeadline NominalDiffTime
+  | AlternateSource BeaconSpec
+  | CancelCeremony
 
 data Ceremony = Ceremony
-  { ceremonyId        :: CeremonyId
-  , ceremonyType      :: CeremonyType
-  , entropyStrategy   :: EntropyStrategy
-  , requiredParties   :: Natural          -- How many commitments needed to proceed
-  , commitDeadline    :: UTCTime          -- Commitments must arrive before this
-  , createdAt         :: UTCTime
-  , phase             :: Phase
-  , createdBy         :: ParticipantId
+  { ceremonyId             :: CeremonyId
+  , question               :: Text
+  , ceremonyType           :: CeremonyType
+  , entropyMethod          :: EntropyMethod
+  , requiredParties        :: Natural
+  , commitmentMode         :: CommitmentMode
+  , commitDeadline         :: UTCTime
+  , revealDeadline         :: Maybe UTCTime
+  , nonParticipationPolicy :: Maybe NonParticipationPolicy
+  , beaconSpec             :: Maybe BeaconSpec
+  , phase                  :: Phase
+  , createdBy              :: ParticipantId
+  , createdAt              :: UTCTime
   }
 
 data Commitment = Commitment
-  { commitmentCeremony  :: CeremonyId
-  , commitmentParty     :: ParticipantId
-  , commitmentHash      :: ByteString     -- Hash of (ceremony_id || party_id || nonce)
-  , commitmentSignature :: Ed25519.Signature
-  , committedAt         :: UTCTime
+  { commitCeremony  :: CeremonyId
+  , commitParty     :: ParticipantId
+  , commitSignature :: ByteString        -- Ed25519 signature
+  , entropySealHash :: Maybe ByteString  -- H(ceremony_id || participant_id || entropy_value)
+  , committedAt     :: UTCTime
   }
 
 data Outcome = Outcome
-  { outcomeCeremony    :: CeremonyId
-  , outcomeValue       :: Value           -- JSON-encoded result
-  , outcomeEntropy     :: ByteString      -- Combined entropy used
-  , outcomeProof       :: OutcomeProof    -- Verification data
-  , resolvedAt         :: UTCTime
+  { outcomeValue     :: CeremonyResult
+  , combinedEntropy  :: ByteString
+  , outcomeProof     :: OutcomeProof
   }
 
+data CeremonyResult
+  = CoinFlipResult Bool
+  | ChoiceResult Text
+  | ShuffleResult [Text]
+  | IntRangeResult Int
+  | WeightedChoiceResult Text
+
 data OutcomeProof = OutcomeProof
-  { proofEntropySources  :: [EntropyContribution]  -- All inputs
-  , proofCombination     :: ByteString             -- XOR/hash of all inputs
-  , proofDerivation      :: ByteString             -- HKDF output used for selection
-  , proofBeaconRound     :: Maybe Natural          -- drand round number if applicable
+  { proofEntropyInputs :: [EntropyContribution]
+  , proofDerivation    :: Text
   }
 ```
 
@@ -230,81 +271,99 @@ data OutcomeProof = OutcomeProof
 
 ```haskell
 data LogEntry = LogEntry
-  { logSequence    :: LogSequence
-  , logCeremony    :: CeremonyId
-  , logEvent       :: CeremonyEvent
-  , logTimestamp   :: UTCTime
-  , logPrevHash    :: ByteString       -- Hash of previous entry (genesis = 0x00)
-  , logEntryHash   :: ByteString       -- SHA-256(sequence || ceremony || event || timestamp || prevHash)
+  { logSequence  :: LogSequence
+  , logCeremony  :: CeremonyId
+  , logEvent     :: CeremonyEvent
+  , logTimestamp  :: UTCTime
+  , logPrevHash  :: ByteString       -- Hash of previous entry (genesis = 0x00)
+  , logEntryHash :: ByteString       -- SHA-256(sequence || ceremony || event || timestamp || prevHash)
   }
 
 data CeremonyEvent
   = CeremonyCreated Ceremony
   | ParticipantCommitted Commitment
-  | EntropyContributed EntropyContribution
-  | BeaconValueAnchored BeaconAnchor
+  | EntropyRevealed ParticipantId ByteString
+  | RevealsPublished [EntropyContribution]
+  | NonParticipationApplied NonParticipationEntry
+  | BeaconAnchored BeaconAnchor
+  | VRFGenerated VRFOutput
   | CeremonyResolved Outcome
   | CeremonyFinalized
   | CeremonyExpired
-  | CeremonyDisputed DisputeReason
-  deriving (Show, Generic, ToJSON, FromJSON)
+  | CeremonyCancelled Text
+  | CeremonyDisputed Text
 ```
 
 ### Database Schema
 
 ```sql
 CREATE TABLE ceremonies (
-    id              UUID PRIMARY KEY,
-    ceremony_type   JSONB NOT NULL,
-    entropy_strategy TEXT NOT NULL,
-    required_parties INTEGER NOT NULL CHECK (required_parties > 0),
-    commit_deadline TIMESTAMPTZ NOT NULL,
-    phase           TEXT NOT NULL DEFAULT 'pending',
-    created_by      UUID NOT NULL,
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    id                       UUID PRIMARY KEY,
+    question                 TEXT NOT NULL,
+    ceremony_type            JSONB NOT NULL,
+    entropy_method           TEXT NOT NULL,
+    required_parties         INTEGER NOT NULL CHECK (required_parties > 0),
+    commitment_mode          TEXT NOT NULL DEFAULT 'immediate',
+    commit_deadline          TIMESTAMPTZ NOT NULL,
+    reveal_deadline          TIMESTAMPTZ,
+    non_participation_policy TEXT,
+    beacon_spec              JSONB,
+    phase                    TEXT NOT NULL DEFAULT 'pending',
+    created_by               UUID NOT NULL,
+    created_at               TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE commitments (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    ceremony_id     UUID NOT NULL REFERENCES ceremonies(id),
-    participant_id  UUID NOT NULL,
-    commitment_hash BYTEA NOT NULL,
-    signature       BYTEA NOT NULL,
-    committed_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ceremony_id      UUID NOT NULL REFERENCES ceremonies(id),
+    participant_id   UUID NOT NULL,
+    signature        BYTEA NOT NULL,
+    entropy_seal     BYTEA,              -- H(ceremony_id || participant_id || entropy_value)
+    display_name     TEXT,               -- Optional human-readable name
+    committed_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE (ceremony_id, participant_id)
 );
 
-CREATE TABLE entropy_contributions (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    ceremony_id     UUID NOT NULL REFERENCES ceremonies(id),
-    source_type     TEXT NOT NULL,  -- 'participant_reveal', 'beacon', 'vrf'
-    contributor_id  UUID,           -- NULL for beacon/vrf
-    commitment_hash BYTEA,          -- For commit-reveal: H(entropy_value)
-    revealed_value  BYTEA,          -- NULL until reveal phase
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+CREATE TABLE entropy_reveals (
+    id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ceremony_id      UUID NOT NULL REFERENCES ceremonies(id),
+    participant_id   UUID NOT NULL,
+    revealed_value   BYTEA NOT NULL,
+    is_default       BOOLEAN NOT NULL DEFAULT FALSE,
+    is_published     BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (ceremony_id, participant_id)
+);
+
+CREATE TABLE beacon_anchors (
+    id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ceremony_id      UUID NOT NULL UNIQUE REFERENCES ceremonies(id),
+    network          TEXT NOT NULL,
+    round_number     BIGINT NOT NULL,
+    value            BYTEA NOT NULL,
+    signature        BYTEA NOT NULL,
+    fetched_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE outcomes (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    ceremony_id     UUID NOT NULL UNIQUE REFERENCES ceremonies(id),
-    outcome_value   JSONB NOT NULL,
+    id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ceremony_id      UUID NOT NULL UNIQUE REFERENCES ceremonies(id),
+    outcome_value    JSONB NOT NULL,
     combined_entropy BYTEA NOT NULL,
-    proof           JSONB NOT NULL,
-    resolved_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    proof            JSONB NOT NULL,
+    resolved_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE audit_log (
-    sequence_num    BIGSERIAL PRIMARY KEY,
-    ceremony_id     UUID NOT NULL REFERENCES ceremonies(id),
-    event_type      TEXT NOT NULL,
-    event_data      JSONB NOT NULL,
-    prev_hash       BYTEA NOT NULL,
-    entry_hash      BYTEA NOT NULL,
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    sequence_num     BIGSERIAL,
+    ceremony_id      UUID NOT NULL REFERENCES ceremonies(id),
+    event_type       TEXT NOT NULL,
+    event_data       JSONB NOT NULL,
+    prev_hash        BYTEA NOT NULL,
+    entry_hash       BYTEA NOT NULL,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (ceremony_id, sequence_num)  -- Per-ceremony scoping
 );
-
--- Index for efficient chain verification
-CREATE INDEX idx_audit_log_ceremony ON audit_log(ceremony_id, sequence_num);
 ```
 
 ---
@@ -320,58 +379,59 @@ The ceremony lifecycle is modeled as a state machine with strictly typed transit
                          │ commitments) │
                          └──────┬───────┘
                                 │
-                   ┌────────────┼────────────┐
-                   │            │             │
-                   ▼            ▼             ▼
-            ┌──────────┐  ┌──────────┐  ┌─────────┐
-            │ Committed│  │ Expired  │  │Disputed │
-            │ (enough  │  │(deadline │  │ (verify │
-            │ parties) │  │ passed)  │  │ failed) │
-            └────┬─────┘  └──────────┘  └─────────┘
-                 │
-                 ▼
-            ┌──────────┐
-            │Resolving │
-            │(entropy  │
-            │collected)│
-            └────┬─────┘
-                 │
-                 ▼
-            ┌──────────┐
-            │Finalized │
-            │(outcome  │
-            │ sealed)  │
-            └──────────┘
+              ┌─────────────────┼─────────────────┐
+              │                 │                  │
+              ▼                 ▼                  ▼
+     ┌────────────────┐  ┌──────────┐  ┌──────────────┐
+     │AwaitingReveals │  │ Expired  │  │  Cancelled   │
+     │ (commit-reveal │  │(deadline │  │  (aborted)   │
+     │  methods)      │  │ passed)  │  └──────────────┘
+     └───────┬────────┘  └──────────┘
+              │
+              ▼
+     ┌────────────────┐
+     │AwaitingBeacon  │
+     │ (drand fetch)  │
+     └───────┬────────┘
+              │
+              ▼
+     ┌────────────────┐
+     │   Resolving    │──────────▶ ┌──────────┐
+     │  (computing    │            │ Disputed │
+     │   outcome)     │            │ (verify  │
+     └───────┬────────┘            │  failed) │
+              │                    └──────────┘
+              ▼
+     ┌────────────────┐
+     │   Finalized    │
+     │ (outcome       │
+     │  sealed)       │
+     └────────────────┘
 ```
+
+The exact path through the middle phases depends on the entropy method:
+- **OfficiantVRF:** `Pending` → `Resolving` → `Finalized` (server generates entropy immediately)
+- **ParticipantReveal:** `Pending` → `AwaitingReveals` → `Resolving` → `Finalized`
+- **ExternalBeacon:** `Pending` → `AwaitingBeacon` → `Resolving` → `Finalized`
+- **Combined:** `Pending` → `AwaitingReveals` → `AwaitingBeacon` → `Resolving` → `Finalized`
 
 ```haskell
--- State transitions as a pure function.
--- Returns either a transition error or the new phase + log events.
 data TransitionError
-  = InvalidPhase Phase Phase          -- Can't go from X to Y
-  | InsufficientCommitments Natural Natural  -- Have N, need M
-  | DeadlinePassed UTCTime
-  | DeadlineNotReached UTCTime
-  | EntropyMissing [ParticipantId]
-  | EntropyVerificationFailed ParticipantId Text
-  | DuplicateCommitment ParticipantId
-  deriving (Show, Eq)
-
-transition
-  :: Ceremony
-  -> UTCTime            -- Current time
-  -> CeremonyAction     -- What we're trying to do
-  -> Either TransitionError (Phase, [CeremonyEvent])
-
-data CeremonyAction
-  = AddCommitment Commitment
-  | ContributeEntropy EntropyContribution
-  | AnchorBeacon BeaconAnchor
-  | Resolve
-  | CheckExpiry
+  = InvalidPhase Phase Phase
+  | QuorumNotReached Natural Natural
+  | DeadlineNotPassed UTCTime UTCTime
+  | DeadlinePassed UTCTime UTCTime
+  | AlreadyCommitted ParticipantId
+  | NotCommitted ParticipantId
+  | AlreadyRevealed ParticipantId
+  | SealMismatch ParticipantId
+  | MethodMismatch EntropyMethod
+  | MissingRevealDeadline
+  | MissingBeaconSpec
+  | InvariantViolation Text
 ```
 
-The key invariant: **no entropy is visible to any participant until all commitments are collected.** The state machine enforces this by only entering the `Committed` phase (which enables entropy revelation) after the required number of commitments are in.
+The key invariant: **no entropy is visible to any participant until all commitments are collected.** The state machine enforces this by only entering the `AwaitingReveals` phase (which enables entropy revelation) after the required number of commitments are in.
 
 ---
 
@@ -399,20 +459,15 @@ This is the gold standard for fairness. No single party (including the server) c
 **Tradeoff:** Requires all participants to complete a two-phase interaction (commit then reveal). A participant who refuses to reveal after seeing others' commitments can stall the ceremony (addressed in Liveness section below).
 
 ```haskell
-data CommitRevealState
-  = AwaitingCommitments (Map ParticipantId ByteString)  -- H(entropy)
-  | AwaitingReveals (Map ParticipantId (ByteString, Maybe ByteString))
-      -- (commitment_hash, maybe revealed_value)
-  | AllRevealed (Map ParticipantId ByteString)  -- All verified reveals
+-- Create an entropy seal: H(ceremony_id || participant_id || entropy_value)
+createSeal :: CeremonyId -> ParticipantId -> ByteString -> ByteString
 
-verifyReveal :: ParticipantId -> CeremonyId -> ByteString -> ByteString -> Bool
-verifyReveal pid cid revealedValue commitHash =
-  sha256 (toBytes cid <> toBytes pid <> revealedValue) == commitHash
+-- Verify that a revealed value matches its seal
+verifySeal :: CeremonyId -> ParticipantId -> ByteString -> ByteString -> Bool
 
-combineEntropy :: Map ParticipantId ByteString -> ByteString
-combineEntropy reveals =
-  sha256 . mconcat . map snd . Map.toAscList $ reveals
-  -- Deterministic ordering by ParticipantId (ascending)
+-- Deterministic default value for non-participating participants
+-- (used when NonParticipationPolicy = DefaultSubstitution)
+defaultEntropyValue :: CeremonyId -> ParticipantId -> ByteString
 ```
 
 ### Strategy 2: External Beacon (Simplest UX)
@@ -435,15 +490,12 @@ Uses a public randomness beacon (primarily [drand](https://drand.love)) as the e
 
 ```haskell
 data BeaconAnchor = BeaconAnchor
-  { beaconNetwork   :: Text          -- e.g., "drand mainnet"
-  , beaconRound     :: Natural
-  , beaconValue     :: ByteString    -- 256-bit randomness
-  , beaconSignature :: ByteString    -- BLS signature for verification
-  , fetchedAt       :: UTCTime
+  { baNetwork   :: Text          -- e.g., "drand-quicknet"
+  , baRound     :: Natural
+  , baValue     :: ByteString    -- 256-bit randomness
+  , baSignature :: ByteString    -- BLS signature for verification
+  , baFetchedAt :: UTCTime
   }
-
--- Verify the beacon value against drand's public key
-verifyBeacon :: DrandPublicKey -> BeaconAnchor -> Bool
 ```
 
 ### Strategy 3: Combined (Recommended Default)
@@ -456,17 +508,17 @@ combinedEntropy participantEntropy beaconEntropy =
   sha256 (participantEntropy <> beaconEntropy)
 ```
 
-### Strategy 4: Server VRF (Lowest Friction)
+### Strategy 4: Officiant VRF (Lowest Friction)
 
-For low-stakes scenarios where UX simplicity matters most. The server uses a Verifiable Random Function (VRF) to produce randomness that is provably derived from a specific input and can be verified by anyone with the server's public VRF key.
+For low-stakes scenarios where UX simplicity matters most. The server (the "officiant") uses a Verifiable Random Function (VRF) to produce randomness that is provably derived from a specific input and can be verified by anyone with the server's public VRF key.
 
 ```haskell
 -- VRF: given a secret key and input, produces a random output + proof
 -- Anyone with the public key can verify that the output was correctly derived
 data VRFOutput = VRFOutput
-  { vrfValue :: ByteString   -- The random output
-  , vrfProof :: ByteString   -- Proof of correct derivation
-  , vrfInput :: ByteString   -- The input (ceremony_id || commitment_hashes)
+  { vrfValue     :: ByteString   -- The random output
+  , vrfProof     :: ByteString   -- Proof of correct derivation
+  , vrfPublicKey :: ByteString   -- Public key for verification
   }
 ```
 
@@ -537,13 +589,7 @@ Mitigations (configurable per ceremony):
 
 3. **Deposit/penalty system (future):** For higher-stakes ceremonies, participants could post a small cryptographic token or external deposit that is forfeited on non-reveal.
 
-```haskell
-data RevealPolicy
-  = DefaultEntropy          -- Use deterministic fallback
-  | ExcludeNonRevealers     -- Resolve without them
-  | AbortCeremony           -- Cancel entirely
-  deriving (Show, Generic, ToJSON, FromJSON)
-```
+The `NonParticipationPolicy` type (defined in the Data Model section) configures which mitigation is used: `DefaultSubstitution`, `Exclusion`, or `Cancellation`.
 
 ### Audit Log Verification
 
@@ -581,61 +627,34 @@ Clients should be encouraged to periodically fetch and verify the chain, and the
 
 ## API Design
 
-The API is defined as a Servant type, providing compile-time route safety and automatic documentation generation.
+The API is defined as a Servant type, providing compile-time route safety and automatic documentation generation. OpenAPI 3.0 docs are served at `/docs`.
 
 ```haskell
 type VeritasAPI =
   -- Ceremony lifecycle
-       "ceremonies" :> ReqBody '[JSON] CreateCeremonyRequest
-                    :> Post '[JSON] Ceremony
-  :<|> "ceremonies" :> Capture "id" CeremonyId
-                    :> Get '[JSON] CeremonyDetail
-  :<|> "ceremonies" :> QueryParam "phase" Phase
-                    :> QueryParam "limit" Natural
-                    :> Get '[JSON] [CeremonySummary]
+       "ceremonies" :> ReqBody '[JSON] CreateCeremonyRequest :> Post '[JSON] CeremonyResponse
+  :<|> "ceremonies" :> Capture "id" UUID :> Get '[JSON] CeremonyResponse
+  :<|> "ceremonies" :> QueryParam "phase" Text :> Get '[JSON] [CeremonyResponse]
+  :<|> "ceremonies" :> Capture "id" UUID :> "commit" :> ReqBody '[JSON] CommitRequest :> Post '[JSON] CommitResponse
+  :<|> "ceremonies" :> Capture "id" UUID :> "reveal" :> ReqBody '[JSON] RevealRequest :> Post '[JSON] RevealResponse
+  :<|> "ceremonies" :> Capture "id" UUID :> "outcome" :> Get '[JSON] OutcomeResponse
+  :<|> "ceremonies" :> Capture "id" UUID :> "log" :> Get '[JSON] AuditLogResponse
+  :<|> "ceremonies" :> Capture "id" UUID :> "verify" :> Get '[JSON] VerifyResponse
 
-  -- Commitments
-  :<|> "ceremonies" :> Capture "id" CeremonyId
-                    :> "commit"
-                    :> ReqBody '[JSON] CommitRequest
-                    :> Post '[JSON] Commitment
+  -- Standalone random
+  :<|> "random" :> "coin" :> Get '[JSON] RandomCoinResponse
+  :<|> "random" :> "integer" :> QueryParam "min" Int :> QueryParam "max" Int :> Get '[JSON] RandomIntResponse
+  :<|> "random" :> "uuid" :> Get '[JSON] RandomUUIDResponse
 
-  -- Entropy (commit-reveal flow)
-  :<|> "ceremonies" :> Capture "id" CeremonyId
-                    :> "entropy" :> "commit"
-                    :> ReqBody '[JSON] EntropyCommitRequest
-                    :> Post '[JSON] EntropyCommitResponse
-  :<|> "ceremonies" :> Capture "id" CeremonyId
-                    :> "entropy" :> "reveal"
-                    :> ReqBody '[JSON] EntropyRevealRequest
-                    :> Post '[JSON] EntropyRevealResponse
+  -- Server info
+  :<|> "server" :> "pubkey" :> Get '[JSON] ServerPubKeyResponse
+  :<|> "health" :> Get '[JSON] HealthResponse
 
-  -- Resolution and outcome
-  :<|> "ceremonies" :> Capture "id" CeremonyId
-                    :> "outcome"
-                    :> Get '[JSON] Outcome
-
-  -- Audit log
-  :<|> "ceremonies" :> Capture "id" CeremonyId
-                    :> "log"
-                    :> QueryParam "from" LogSequence
-                    :> Get '[JSON] [LogEntry]
-  :<|> "ceremonies" :> Capture "id" CeremonyId
-                    :> "verify"
-                    :> Get '[JSON] VerificationResult
-
-  -- Standalone randomness utilities (no ceremony needed)
-  :<|> "random" :> "coin"    :> Get '[JSON] CoinFlipResult
-  :<|> "random" :> "integer" :> QueryParam' '[Required] "min" Int
-                             :> QueryParam' '[Required] "max" Int
-                             :> Get '[JSON] IntegerResult
-  :<|> "random" :> "uuid"    :> Get '[JSON] UUIDResult
-  :<|> "random" :> "beacon"  :> Get '[JSON] BeaconAnchor
-
-  -- Server identity and verification
-  :<|> "server" :> "pubkey"  :> Get '[JSON] PublicKeyInfo
-  :<|> "health"              :> Get '[JSON] HealthCheck
+-- OpenAPI docs endpoint (separate from VeritasAPI)
+type FullAPI = VeritasAPI :<|> "docs" :> Get '[JSON] OpenApi
 ```
+
+The commit and reveal endpoints handle both the participation commitment and the entropy seal/reveal in a single request — there are no separate `/entropy/commit` and `/entropy/reveal` endpoints.
 
 ### Request/Response Examples
 
@@ -643,12 +662,15 @@ type VeritasAPI =
 ```json
 POST /ceremonies
 {
-  "type": { "tag": "CoinFlip" },
-  "entropy_strategy": "Combined",
+  "question": "Who picks the restaurant tonight",
+  "ceremony_type": { "tag": "CoinFlip" },
+  "entropy_method": "Combined",
   "required_parties": 2,
+  "commitment_mode": "Immediate",
   "commit_deadline": "2026-03-01T12:00:00Z",
-  "reveal_policy": "DefaultEntropy",
-  "description": "Who picks the restaurant tonight"
+  "reveal_deadline": "2026-03-01T12:30:00Z",
+  "non_participation_policy": "DefaultSubstitution",
+  "beacon_spec": { "beaconNetwork": "drand-quicknet", "beaconRound": null, "beaconFallback": { "tag": "CancelCeremony" } }
 }
 ```
 
@@ -657,28 +679,18 @@ POST /ceremonies
 POST /ceremonies/{id}/commit
 {
   "participant_id": "550e8400-e29b-41d4-a716-446655440000",
-  "commitment_hash": "a3f2b8c1...",
-  "signature": "ed25519_sig_bytes..."
+  "signature": "ed25519_sig_hex...",
+  "entropy_seal": "sha256_hex...",
+  "display_name": "Alice"
 }
 ```
 
-**Fetch outcome (after resolution):**
+**Reveal entropy:**
 ```json
-GET /ceremonies/{id}/outcome
+POST /ceremonies/{id}/reveal
 {
-  "ceremony_id": "...",
-  "value": "heads",
-  "combined_entropy": "0xabcdef...",
-  "proof": {
-    "entropy_sources": [
-      { "type": "participant_reveal", "participant": "...", "value": "0x..." },
-      { "type": "participant_reveal", "participant": "...", "value": "0x..." },
-      { "type": "beacon", "network": "drand mainnet", "round": 4829103, "value": "0x..." }
-    ],
-    "combination_method": "sha256_concat",
-    "derived_via": "hkdf_sha256"
-  },
-  "resolved_at": "2026-03-01T12:00:03Z"
+  "participant_id": "550e8400-e29b-41d4-a716-446655440000",
+  "entropy_value": "random_256_bit_hex..."
 }
 ```
 
@@ -702,11 +714,12 @@ withCeremonyLock
 
 ### Background Workers
 
-- **Expiry checker:** Periodic task that moves ceremonies past their deadline from `Pending` to `Expired`
-- **Beacon fetcher:** Watches drand for new rounds and anchors values for ceremonies awaiting beacon entropy
-- **Auto-resolver:** Resolves ceremonies where all entropy has been collected
+Four background workers run as lightweight Haskell threads (`forkIO`), each on a configurable polling interval:
 
-These can be modeled as lightweight Haskell threads using `async` or as a simple `forkIO`-based scheduler, since the expected load is modest.
+- **Expiry checker:** Moves ceremonies past their commit deadline from `Pending` to `Expired`
+- **Beacon fetcher:** Watches drand for new rounds and anchors values for ceremonies in `AwaitingBeacon`
+- **Reveal deadline checker:** Enforces reveal deadlines for ceremonies in `AwaitingReveals`, applying the non-participation policy for non-revealers
+- **Auto-resolver:** Resolves ceremonies where all entropy has been collected
 
 ### Scaling Considerations
 
@@ -765,66 +778,51 @@ prop_shuffleUniformity :: NonEmpty Text -> Property
 
 ### Docker Configuration
 
-```dockerfile
-FROM haskell:9.6 AS builder
-WORKDIR /app
-COPY veritas.cabal cabal.project ./
-RUN cabal update && cabal build --only-dependencies
-COPY . .
-RUN cabal build && cabal install --install-method=copy --installdir=/app/dist
+Two Dockerfiles: a development image (`Dockerfile`) and a multi-stage production image (`Dockerfile.prod`). Both use `haskell:9.6-slim` as the base and install libpq from the PostgreSQL APT repository.
 
-FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y libpq-dev ca-certificates && rm -rf /var/lib/apt/lists/*
-COPY --from=builder /app/dist/veritas /usr/local/bin/
-EXPOSE 8080
-CMD ["veritas"]
+Docker Compose defines four services:
+- `db` — PostgreSQL 16
+- `app` — development backend (builds from `Dockerfile`, runs via `cabal run veritas`)
+- `web` — Vite dev server for the React frontend (Node 20, port 3002, proxies API to `app`)
+- `dev` — build/test container (mounts source, cabal caches; entrypoint is `sleep infinity`, override with `--entrypoint cabal`)
+
+```bash
+# Build and test (no local Haskell tooling required)
+docker compose run --rm --entrypoint cabal dev build
+docker compose run --rm --entrypoint cabal dev test
+
+# Start everything
+docker compose up -d
 ```
 
 ### Environment Configuration
 
-```dhall
-{ server =
-    { port = 8080
-    , host = "0.0.0.0"
-    , tlsCert = Some "/etc/veritas/cert.pem"
-    , tlsKey = Some "/etc/veritas/key.pem"
-    }
-, database =
-    { host = "localhost"
-    , port = 5432
-    , name = "veritas"
-    , poolSize = 10
-    }
-, crypto =
-    { serverKeyPath = "/etc/veritas/server.ed25519"
-    , vrfKeyPath = "/etc/veritas/server.vrf"
-    }
-, beacon =
-    { drandUrl = "https://api.drand.sh"
-    , drandChainHash = "8990e7a9aaed2ffed73dbd7092123d6f289930540d7651336225dc172e51b2ce"
-    }
-, ceremonies =
-    { defaultRevealPolicy = "DefaultEntropy"
-    , maxCommitDeadlineHours = 168  -- 1 week
-    , revealTimeoutMinutes = 60
-    }
-}
-```
+Configuration is via environment variables (no dhall):
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `VERITAS_PORT` | `8080` | Server port |
+| `VERITAS_DB` | `host=localhost port=5432 dbname=veritas` | PostgreSQL connection string |
+| `VERITAS_DB_POOL_SIZE` | `10` | Connection pool size |
+| `VERITAS_SERVER_KEY` | (none) | Path to Ed25519 server key file |
+| `VERITAS_DRAND_RELAY_URL` | `https://api.drand.sh` | drand relay base URL |
+| `VERITAS_DRAND_CHAIN_HASH` | `52db9ba7...` (quicknet) | drand chain hash |
+| `VERITAS_RATE_LIMIT` | `60` | Max requests per window |
+| `VERITAS_RATE_WINDOW` | `60` | Rate limit window (seconds) |
+| `VERITAS_TLS_CERT` | (none) | TLS certificate path (enables TLS if set) |
+| `VERITAS_TLS_KEY` | (none) | TLS key path |
 
 ---
 
 ## Future Extensions
 
-These are out of scope for the initial implementation but inform architectural decisions:
+Beyond the roadmap, these ideas inform architectural decisions:
 
-- **WebSocket subscriptions** for real-time ceremony status updates
-- **Client SDKs** (TypeScript, Python) for easy integration
-- **Web UI** for non-technical participants to join ceremonies via link
-- **Ceremony templates** — save and reuse configurations (e.g., "weekly team lunch picker")
 - **Federation** — multiple Veritas servers can cross-verify each other's audit logs
 - **Threshold signatures** — require M-of-N server operators to sign outcomes (decentralize the server itself)
 - **SNARK/STARK proofs** — zero-knowledge proofs that a ceremony was conducted correctly, without revealing participant identities
 - **Mobile push notifications** when a ceremony you've committed to reaches the reveal phase
+- **Deposit/penalty system** — for higher-stakes ceremonies, participants post a stake that is forfeited on non-reveal
 
 ---
 
@@ -845,6 +843,7 @@ These are out of scope for the initial implementation but inform architectural d
 
 - Participant commit-reveal entropy
 - drand beacon integration
+- **drand BLS signature verification** — verify beacon values against drand's public key before anchoring. Without this, the system trusts the drand relay to return authentic values. A compromised or spoofed relay could feed fake randomness. Requires a BLS12-381 library. **NOT YET IMPLEMENTED.**
 - Combined entropy strategy
 - Log verification endpoint
 - Statistical test suite for output quality
@@ -863,9 +862,55 @@ These are out of scope for the initial implementation but inform architectural d
 
 - Web UI for ceremony participation
 - Shareable ceremony links (join via URL)
+- Participant display names
 - WebSocket real-time updates
 - Client SDKs
 - Ceremony templates
+
+### Phase 5: Participant Identity & Non-Repudiation
+
+The current system identifies participants by ephemeral UUIDs — sufficient for low-stakes ceremonies where everyone trusts each other, but inadequate when a participant might deny their commitment after an unfavorable outcome. This phase adds two identity strategies that cover different trust models.
+
+**OAuth identity (human participants, low friction)**
+
+- OAuth 2.0 integration (Google, GitHub) for linking commitments to real-world accounts
+- Commitments display the authenticated identity (e.g. "alice@example.com committed")
+- Optional per-ceremony policy: require authenticated participants, or allow anonymous
+- Identity provider is trusted — appropriate for social/casual use cases
+
+**Self-contained ceremony identity (agents and advanced users)**
+
+A zero-infrastructure identity protocol where the ceremony record itself constitutes complete cryptographic proof of participation. No external identity provider, certificate authority, or pre-existing key exchange required.
+
+Protocol:
+
+1. **Join** — Each participant registers a public key with the ceremony. No commitments yet.
+2. **Roster acknowledgment** — Once all required parties have joined, each participant signs the full participant roster ("I see that this ceremony has participants with keys [X, Y, Z], and I'm proceeding"). This proves mutual awareness.
+3. **Commitment** — Each participant signs their commitment with the same key. The audit log records the signature and sequence.
+4. **Resolution + finalization** — Outcome is determined, everything sealed into the hash chain.
+
+Non-repudiation argument: denying involvement requires claiming private key compromise, because the record contains (a) the participant's public key registered before commitments, (b) a roster signature proving they saw who else was participating, and (c) a signed commitment binding them to the outcome — all in a tamper-evident hash chain.
+
+This is particularly suited to AI agent coordination where agents handle cryptography natively and may not have out-of-band channels for key exchange. The ceremony becomes a self-bootstrapping trust context.
+
+Implementation:
+
+- Persistent keypair generation and storage (per-agent or per-session, configurable)
+- Roster data structure: ordered list of (participant_id, public_key) tuples
+- Roster signing endpoint: POST `/ceremonies/{id}/acknowledge-roster`
+- Signed commitments: commitment payload includes Ed25519 signature over (ceremony_id, participant_pubkey, commitment_data)
+- Verification: any party can verify all signatures in the ceremony record independently
+- API identity mode field on ceremony creation: `anonymous` | `oauth` | `self-certified`
+
+### Phase 6: Educational UX
+
+The app should function as a teaching tool that explains how the protocol works by guiding users through actually using it. Users should come away understanding *why* the outcome is trustworthy, not just that it is.
+
+- Contextual explanations at each ceremony phase ("Why do we collect commitments before revealing entropy?", "What does this signature prove?")
+- Visual audit log walkthrough — step through the hash chain with plain-language annotations showing what each entry proves and why it's linked to the previous one
+- "How it works" panel on ceremony detail page with progressive disclosure — summary for casual users, full cryptographic detail for those who want it
+- Guided first-ceremony flow that highlights each trust guarantee as the user encounters it
+- Explanation of identity modes: what each one guarantees and what it doesn't
 
 ---
 

@@ -54,6 +54,7 @@ common common-deps
     , openapi3          >= 3.2
     , lens              >= 5.0
     , insert-ordered-containers >= 0.2
+    , wai-cors            >= 0.2
 
 library
   import:           common-deps

@@ -14,6 +14,7 @@ runMigrations conn = do
   execute_ conn createBeaconAnchorsTable
   execute_ conn createOutcomesTable
   execute_ conn createAuditLogTable
+  execute_ conn "ALTER TABLE commitments ADD COLUMN IF NOT EXISTS display_name TEXT"
   pure ()
 
 createCeremoniesTable :: Query
