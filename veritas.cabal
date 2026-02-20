@@ -71,7 +71,6 @@ library
     Veritas.Crypto.VRF
     Veritas.API.Types
     Veritas.API.Handlers
-    Veritas.API.Auth
     Veritas.DB.Pool
     Veritas.DB.Queries
     Veritas.DB.Migrations

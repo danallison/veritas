@@ -29,7 +29,8 @@ import Veritas.Core.Types
 import Veritas.Core.StateMachine (Action(..), TransitionResult(..), transition)
 import Veritas.Core.Resolution (resolve, deriveIntRange)
 import Veritas.Core.Entropy (verifySealForReveal)
-import Veritas.Crypto.Hash (sha256, genesisHash, deriveUniform)
+import qualified Crypto.Random
+import Veritas.Crypto.Hash (genesisHash, deriveUniform)
 import Veritas.Crypto.VRF (generateVRF)
 import Veritas.Crypto.Signatures (KeyPair(..), publicKeyBytes)
 import Veritas.DB.Pool (DBPool, withConnection, withSerializableTransaction)
@@ -92,6 +93,9 @@ createCeremony AppEnv{..} req = do
 
   now <- liftIO getCurrentTime
   cid <- liftIO UUID4.nextRandom
+  creator <- case crqCreatedBy req of
+    Just pid -> pure pid
+    Nothing  -> liftIO UUID4.nextRandom
   let ceremony = Ceremony
         { ceremonyId = CeremonyId cid
         , question = crqQuestion req
@@ -104,7 +108,7 @@ createCeremony AppEnv{..} req = do
         , nonParticipationPolicy = crqNonParticipationPolicy req
         , beaconSpec = crqBeaconSpec req
         , phase = Pending
-        , createdBy = ParticipantId UUID.nil  -- placeholder for Phase 1
+        , createdBy = ParticipantId creator
         , createdAt = now
         }
   liftIO $ do
@@ -202,7 +206,6 @@ commitToCeremony AppEnv{..} cid req = do
           let commit = Commitment
                 { commitCeremony = CeremonyId cid
                 , commitParty = pid
-                , commitSignature = TE.encodeUtf8 (cmrqSignature req)
                 , entropySealHash = cmrqEntropySeal req >>= hexDecode
                 , committedAt = now
                 }
@@ -410,12 +413,9 @@ verifyHashChain rows = go genesisHash rows
       | Q.alrPrevHash r /= expectedPrev = False
       | otherwise = go (Q.alrEntryHash r) rs
 
--- | Generate 32 random bytes using UUID as entropy source
+-- | Generate 32 cryptographically secure random bytes
 generateRandomBytes :: IO ByteString
-generateRandomBytes = do
-  u1 <- UUID4.nextRandom
-  u2 <- UUID4.nextRandom
-  pure $ sha256 (UUID.toASCIIBytes u1 <> UUID.toASCIIBytes u2)
+generateRandomBytes = Crypto.Random.getRandomBytes 32
 
 -- | Hex-decode a Text to ByteString, returning Nothing on invalid hex
 hexDecode :: Text -> Maybe ByteString

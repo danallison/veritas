@@ -122,7 +122,7 @@ describe('API method paths', () => {
     const fetchMock = mockFetch({ ok: true, status: 200, body: {} })
     const { api } = await loadClient()
 
-    await api.commit('abc-123', { participant_id: 'p1', signature: 'sig' })
+    await api.commit('abc-123', { participant_id: 'p1' })
 
     const [url] = fetchMock.mock.calls[0]
     expect(url).toBe(`${TEST_BASE}/ceremonies/abc-123/commit`)

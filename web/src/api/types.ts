@@ -58,12 +58,12 @@ export interface CreateCeremonyRequest {
   commit_deadline: string  // ISO 8601
   reveal_deadline?: string
   non_participation_policy?: NonParticipationPolicy
+  created_by?: string  // participant UUID
   beacon_spec?: BeaconSpec
 }
 
 export interface CommitRequest {
   participant_id: string
-  signature: string
   entropy_seal?: string  // hex-encoded SHA-256
   display_name?: string
 }

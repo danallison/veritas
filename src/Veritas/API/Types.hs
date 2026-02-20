@@ -84,6 +84,7 @@ data CreateCeremonyRequest = CreateCeremonyRequest
   , crqRevealDeadline         :: Maybe UTCTime
   , crqNonParticipationPolicy :: Maybe NonParticipationPolicy
   , crqBeaconSpec             :: Maybe BeaconSpec
+  , crqCreatedBy              :: Maybe UUID
   } deriving stock (Eq, Show, Generic)
 
 instance FromJSON CreateCeremonyRequest where
@@ -97,6 +98,7 @@ instance FromJSON CreateCeremonyRequest where
     <*> o .:? "reveal_deadline"
     <*> o .:? "non_participation_policy"
     <*> o .:? "beacon_spec"
+    <*> o .:? "created_by"
 
 instance ToJSON CreateCeremonyRequest where
   toJSON r = object
@@ -109,11 +111,11 @@ instance ToJSON CreateCeremonyRequest where
     , "reveal_deadline"          .= crqRevealDeadline r
     , "non_participation_policy" .= crqNonParticipationPolicy r
     , "beacon_spec"              .= crqBeaconSpec r
+    , "created_by"               .= crqCreatedBy r
     ]
 
 data CommitRequest = CommitRequest
   { cmrqParticipantId :: UUID
-  , cmrqSignature     :: Text
   , cmrqEntropySeal   :: Maybe Text
   , cmrqDisplayName   :: Maybe Text
   } deriving stock (Eq, Show, Generic)
@@ -121,14 +123,12 @@ data CommitRequest = CommitRequest
 instance FromJSON CommitRequest where
   parseJSON = withObject "CommitRequest" $ \o -> CommitRequest
     <$> o .: "participant_id"
-    <*> o .: "signature"
     <*> o .:? "entropy_seal"
     <*> o .:? "display_name"
 
 instance ToJSON CommitRequest where
   toJSON r = object
     [ "participant_id" .= cmrqParticipantId r
-    , "signature"      .= cmrqSignature r
     , "entropy_seal"   .= cmrqEntropySeal r
     , "display_name"   .= cmrqDisplayName r
     ]
@@ -400,6 +400,7 @@ instance ToSchema CreateCeremonyRequest where
       , ("reveal_deadline", mempty & OA.type_ ?~ OA.OpenApiString & OA.format ?~ "date-time")
       , ("non_participation_policy", mempty & OA.type_ ?~ OA.OpenApiString & OA.description ?~ "DefaultSubstitution | Exclusion | Cancellation")
       , ("beacon_spec", mempty & OA.description ?~ "Beacon source configuration (required for ExternalBeacon/Combined)")
+      , ("created_by", mempty & OA.type_ ?~ OA.OpenApiString & OA.format ?~ "uuid" & OA.description ?~ "Participant ID of the creator (generated if omitted)")
       ]
     & OA.required .~ ["question", "ceremony_type", "entropy_method", "required_parties", "commitment_mode", "commit_deadline"]
 
@@ -408,11 +409,10 @@ instance ToSchema CommitRequest where
     & OA.type_ ?~ OA.OpenApiObject
     & OA.properties .~ props
       [ ("participant_id", mempty & OA.type_ ?~ OA.OpenApiString & OA.format ?~ "uuid")
-      , ("signature", mempty & OA.type_ ?~ OA.OpenApiString)
       , ("entropy_seal", mempty & OA.type_ ?~ OA.OpenApiString & OA.description ?~ "SHA-256 seal of entropy (required for ParticipantReveal/Combined)")
       , ("display_name", mempty & OA.type_ ?~ OA.OpenApiString & OA.description ?~ "Optional display name for the participant")
       ]
-    & OA.required .~ ["participant_id", "signature"]
+    & OA.required .~ ["participant_id"]
 
 instance ToSchema RevealRequest where
   declareNamedSchema _ = pure $ OA.NamedSchema (Just "RevealRequest") $ mempty

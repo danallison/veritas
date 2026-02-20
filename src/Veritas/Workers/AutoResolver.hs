@@ -5,7 +5,7 @@ module Veritas.Workers.AutoResolver
 
 import Control.Concurrent (threadDelay)
 import Control.Exception (try, SomeException)
-import Control.Monad (forever, forM_)
+import Control.Monad (forever, forM_, when)
 import qualified Data.Aeson as Aeson
 import Database.PostgreSQL.Simple (Connection)
 import Katip
@@ -32,6 +32,13 @@ runAutoResolver logEnv pool keyPair intervalSeconds = forever $ do
           Just row -> do
             contributions <- gatherEntropy conn' (CeremonyId cid) row keyPair
 
+            -- Log VRF generation for officiant_vrf method
+            when (Q.crEntropyMethod row == "officiant_vrf") $
+              case contributions of
+                [ec] | VRFEntropy vrfOut <- ecSource ec ->
+                  Q.appendAuditLog conn' (CeremonyId cid) (VRFGenerated vrfOut)
+                _ -> pure ()
+
             let ctype = case Aeson.fromJSON (Q.crCeremonyType row) of
                   Aeson.Success ct -> ct
                   _                -> CoinFlip
@@ -39,6 +46,8 @@ runAutoResolver logEnv pool keyPair intervalSeconds = forever $ do
 
             Q.insertOutcome conn' (CeremonyId cid) outcome
             Q.updateCeremonyPhase conn' (CeremonyId cid) Finalized
+            Q.appendAuditLog conn' (CeremonyId cid) (CeremonyResolved outcome)
+            Q.appendAuditLog conn' (CeremonyId cid) CeremonyFinalized
   case result of
     Left err -> runKatipT logEnv $
       logMsg "worker.resolver" ErrorS (showLS err)

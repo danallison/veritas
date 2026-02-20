@@ -9,7 +9,7 @@ import Control.Monad (forever, forM_)
 import Data.Time (getCurrentTime)
 import Katip
 
-import Veritas.Core.Types (CeremonyId(..), Phase(..))
+import Veritas.Core.Types (CeremonyId(..), CeremonyEvent(..), Phase(..))
 import Veritas.DB.Pool (DBPool, withConnection, withSerializableTransaction)
 import qualified Veritas.DB.Queries as Q
 
@@ -32,7 +32,7 @@ runExpiryChecker logEnv pool intervalSeconds = forever $ do
             if count < required
               then do
                 Q.updateCeremonyPhase conn' (CeremonyId cid) Expired
-                -- Audit log entry handled by appendAuditLog in handlers
+                Q.appendAuditLog conn' (CeremonyId cid) CeremonyExpired
               else do
                 -- Quorum met at deadline: transition based on entropy method
                 let method = Q.crEntropyMethod row

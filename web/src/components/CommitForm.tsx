@@ -42,7 +42,6 @@ export default function CommitForm({
 
       await api.commit(ceremonyId, {
         participant_id: participantId,
-        signature: 'web-ui',
         entropy_seal,
         display_name: trimmedName || undefined,
       })

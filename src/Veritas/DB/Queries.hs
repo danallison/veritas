@@ -135,11 +135,10 @@ updateCeremonyPhase conn (CeremonyId cid) newPhase = do
 insertCommitment :: Connection -> Commitment -> Maybe Text -> IO ()
 insertCommitment conn Commitment{..} mDisplayName = do
   _ <- execute conn
-    "INSERT INTO commitments (ceremony_id, participant_id, signature, entropy_seal, committed_at, display_name) \
-    \VALUES (?, ?, ?, ?, ?, ?)"
+    "INSERT INTO commitments (ceremony_id, participant_id, entropy_seal, committed_at, display_name) \
+    \VALUES (?, ?, ?, ?, ?)"
     ( unCeremonyId commitCeremony
     , unParticipantId commitParty
-    , Binary commitSignature
     , fmap Binary entropySealHash
     , committedAt
     , mDisplayName
@@ -149,7 +148,7 @@ insertCommitment conn Commitment{..} mDisplayName = do
 getCommitments :: Connection -> CeremonyId -> IO [CommitmentRow]
 getCommitments conn (CeremonyId cid) =
   query conn
-    "SELECT ceremony_id, participant_id, signature, entropy_seal, committed_at, display_name \
+    "SELECT ceremony_id, participant_id, entropy_seal, committed_at, display_name \
     \FROM commitments WHERE ceremony_id = ? ORDER BY committed_at"
     (Only cid)
 
@@ -327,14 +326,13 @@ instance FromRow CeremonyRow where
 data CommitmentRow = CommitmentRow
   { cmrCeremonyId    :: UUID
   , cmrParticipantId :: UUID
-  , cmrSignature     :: ByteString
   , cmrEntropySeal   :: Maybe ByteString
   , cmrCommittedAt   :: UTCTime
   , cmrDisplayName   :: Maybe Text
   } deriving stock (Show)
 
 instance FromRow CommitmentRow where
-  fromRow = CommitmentRow <$> field <*> field <*> field <*> field <*> field <*> field
+  fromRow = CommitmentRow <$> field <*> field <*> field <*> field <*> field
 
 data BeaconAnchorRow = BeaconAnchorRow
   { barNetwork   :: Text
@@ -413,7 +411,6 @@ commitmentRowToDomain :: CommitmentRow -> Commitment
 commitmentRowToDomain CommitmentRow{..} = Commitment
   { commitCeremony = CeremonyId cmrCeremonyId
   , commitParty = ParticipantId cmrParticipantId
-  , commitSignature = cmrSignature
   , entropySealHash = cmrEntropySeal
   , committedAt = cmrCommittedAt
   }

@@ -55,7 +55,6 @@ mkTestCommitment :: Commitment
 mkTestCommitment = Commitment
   { commitCeremony = CeremonyId UUID.nil
   , commitParty = ParticipantId (UUID.fromWords 1 0 0 0)
-  , commitSignature = "sig"
   , entropySealHash = Nothing
   , committedAt = read "2025-01-01 00:00:00 UTC"
   }

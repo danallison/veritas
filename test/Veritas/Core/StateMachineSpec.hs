@@ -46,7 +46,6 @@ mkCommitment :: ParticipantId -> Maybe ByteString -> UTCTime -> Commitment
 mkCommitment pid seal ts = Commitment
   { commitCeremony = testCeremonyId
   , commitParty = pid
-  , commitSignature = "test-sig"
   , entropySealHash = seal
   , committedAt = ts
   }

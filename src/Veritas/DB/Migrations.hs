@@ -15,6 +15,7 @@ runMigrations conn = do
   execute_ conn createOutcomesTable
   execute_ conn createAuditLogTable
   execute_ conn "ALTER TABLE commitments ADD COLUMN IF NOT EXISTS display_name TEXT"
+  execute_ conn "ALTER TABLE commitments DROP COLUMN IF EXISTS signature"
   pure ()
 
 createCeremoniesTable :: Query
@@ -41,7 +42,6 @@ createCommitmentsTable =
   \  id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),\
   \  ceremony_id      UUID NOT NULL REFERENCES ceremonies(id),\
   \  participant_id   UUID NOT NULL,\
-  \  signature        BYTEA NOT NULL,\
   \  entropy_seal     BYTEA,\
   \  committed_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),\
   \  UNIQUE (ceremony_id, participant_id)\

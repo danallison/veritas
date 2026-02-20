@@ -1,10 +1,12 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
+import { useParticipant } from '../hooks/useParticipant'
 import type { EntropyMethod, CommitmentMode, NonParticipationPolicy, CeremonyType, BeaconSpec } from '../api/types'
 
 export default function CreateCeremonyPage() {
   const navigate = useNavigate()
+  const { participantId } = useParticipant()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -62,6 +64,7 @@ export default function CreateCeremonyPage() {
         reveal_deadline: revealDeadline,
         non_participation_policy: needsRevealParams ? nonPartPolicy : undefined,
         beacon_spec: beaconSpec,
+        created_by: participantId,
       })
       navigate(`/ceremonies/${ceremony.id}`)
     } catch (e) {

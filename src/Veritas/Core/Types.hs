@@ -45,9 +45,11 @@ import Data.Aeson
   ( FromJSON(..), ToJSON(..), Value(..)
   , withObject, (.:), (.=), object
   )
-import Data.Aeson.Types (Pair)
+import Data.Aeson.Types (Pair, Parser)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
+import Data.ByteArray.Encoding (Base(..), convertFromBase)
+import qualified Data.Text.Encoding as TE
 import qualified Data.OpenApi
 import Data.OpenApi (ToSchema(..))
 import Data.Text (Text)
@@ -155,7 +157,6 @@ data Ceremony = Ceremony
 data Commitment = Commitment
   { commitCeremony  :: CeremonyId
   , commitParty     :: ParticipantId
-  , commitSignature :: ByteString
   , entropySealHash :: Maybe ByteString
   , committedAt     :: UTCTime
   } deriving stock (Eq, Show, Generic)
@@ -164,7 +165,6 @@ instance ToJSON Commitment where
   toJSON c = object
     [ "commitCeremony"  .= commitCeremony c
     , "commitParty"     .= commitParty c
-    , "commitSignature" .= bsToText (commitSignature c)
     , "entropySealHash" .= fmap bsToText (entropySealHash c)
     , "committedAt"     .= committedAt c
     ]
@@ -220,8 +220,8 @@ instance FromJSON BeaconAnchor where
   parseJSON = withObject "BeaconAnchor" $ \o -> BeaconAnchor
     <$> o .: "baNetwork"
     <*> o .: "baRound"
-    <*> (textToBS <$> o .: "baValue")
-    <*> (textToBS <$> o .: "baSignature")
+    <*> (o .: "baValue" >>= parseHexField "baValue")
+    <*> (o .: "baSignature" >>= parseHexField "baSignature")
     <*> o .: "baFetchedAt"
 
 -- | VRF output with proof
@@ -240,9 +240,9 @@ instance ToJSON VRFOutput where
 
 instance FromJSON VRFOutput where
   parseJSON = withObject "VRFOutput" $ \o -> VRFOutput
-    <$> (textToBS <$> o .: "vrfValue")
-    <*> (textToBS <$> o .: "vrfProof")
-    <*> (textToBS <$> o .: "vrfPublicKey")
+    <$> (o .: "vrfValue" >>= parseHexField "vrfValue")
+    <*> (o .: "vrfProof" >>= parseHexField "vrfProof")
+    <*> (o .: "vrfPublicKey" >>= parseHexField "vrfPublicKey")
 
 -- | The computed outcome of a ceremony
 data Outcome = Outcome
@@ -373,6 +373,12 @@ bsToText = T.pack . concatMap (\w -> [hexChar (w `div` 16), hexChar (w `mod` 16)
       | n < 10    = toEnum (fromIntegral n + fromEnum '0')
       | otherwise = toEnum (fromIntegral n - 10 + fromEnum 'a')
 
--- | Helper: decode text to ByteString (simplified for Phase 1; use proper hex decode for production)
-textToBS :: Text -> ByteString
-textToBS t = BS.pack (map (fromIntegral . fromEnum) (T.unpack t))
+-- | Helper: decode hex-encoded text to ByteString, failing on invalid hex
+textToBS :: Text -> Either String ByteString
+textToBS t = convertFromBase Base16 (TE.encodeUtf8 t)
+
+-- | Parse a hex-encoded JSON string field as ByteString (for use in FromJSON instances)
+parseHexField :: String -> Text -> Parser ByteString
+parseHexField fieldName t = case textToBS t of
+  Right bs -> pure bs
+  Left _   -> fail ("invalid hex in field " <> fieldName)
