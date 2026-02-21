@@ -96,6 +96,15 @@ executable veritas
     -rtsopts
     "-with-rtsopts=-N"
 
+executable gen-test-vectors
+  import:           common-deps
+  hs-source-dirs:   test
+  main-is:          GenTestVectors.hs
+  build-depends:
+    , veritas
+  ghc-options:
+    -threaded
+
 test-suite veritas-tests
   import:           common-deps
   type:             exitcode-stdio-1.0

@@ -38,8 +38,12 @@ function eventDescription(
       return 'Reveals published'
     case 'non_participation_applied':
       return 'Non-participation policy applied'
-    case 'beacon_anchored':
-      return 'Beacon anchored'
+    case 'beacon_anchored': {
+      const bd = entry.event_data as Record<string, unknown>
+      const ba = bd?.anchor as Record<string, unknown> | undefined
+      const round = ba?.baRound
+      return round != null ? `Beacon anchored (round ${round})` : 'Beacon anchored'
+    }
     case 'vrf_generated':
       return 'Server randomness generated'
     case 'ceremony_resolved':

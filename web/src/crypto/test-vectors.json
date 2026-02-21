@@ -1,0 +1,123 @@
+{
+    "coinFlip": {
+        "entropy": "9ed68f0ca3d1c9aabb0fc8f86e933fb613c59ab7656985e96e08d2d35c26306d",
+        "result": false
+    },
+    "combine": {
+        "combined": "9ed68f0ca3d1c9aabb0fc8f86e933fb613c59ab7656985e96e08d2d35c26306d",
+        "inputs": [
+            "f96b3e2b2894159a6f1d84fe5ee9fb63bd5f36fc7328e8b7c1b75f58f896a057",
+            "126a203b972056c01c15ebc163b0037b4d8cd58387436de0e15a913c74fe13a3"
+        ]
+    },
+    "fullPipeline": {
+        "coin_flip_result": false,
+        "combined_entropy": "9ed68f0ca3d1c9aabb0fc8f86e933fb613c59ab7656985e96e08d2d35c26306d",
+        "contributions": [
+            {
+                "participant_id": "550e8400-e29b-41d4-a716-446655440000",
+                "source": "ParticipantEntropy",
+                "value": "f96b3e2b2894159a6f1d84fe5ee9fb63bd5f36fc7328e8b7c1b75f58f896a057"
+            },
+            {
+                "participant_id": "660e8400-e29b-41d4-a716-446655440000",
+                "source": "ParticipantEntropy",
+                "value": "126a203b972056c01c15ebc163b0037b4d8cd58387436de0e15a913c74fe13a3"
+            }
+        ]
+    },
+    "hkdf": {
+        "input": "f96b3e2b2894159a6f1d84fe5ee9fb63bd5f36fc7328e8b7c1b75f58f896a057",
+        "shuffle_0_output": "11910bcbe2fe502f178ac90e26f0757d08d2cf32b40f3b28090eecf681bbed77",
+        "shuffle_10_output": "22622e4bc66c88959461c1a8eabce41c91fded04ef62c9f532e974cc7c08bc29",
+        "shuffle_1_output": "15ba5e5f6dd6d826b397390e082d727dcc0fba216b6d690f62038b9229f7344d",
+        "uniform_output": "f6ffaea9c22f6f9326d5f940ab3416628b93f3870f9d463550b4a349bc934398"
+    },
+    "intRange": {
+        "entropy": "9ed68f0ca3d1c9aabb0fc8f86e933fb613c59ab7656985e96e08d2d35c26306d",
+        "hi": 100,
+        "lo": 1,
+        "result": 29
+    },
+    "mixedSources": {
+        "canonical_order": [
+            "ParticipantEntropy",
+            "DefaultEntropy",
+            "BeaconEntropy",
+            "VRFEntropy"
+        ],
+        "ceremony_type": "UniformChoice",
+        "choices": [
+            "x",
+            "y",
+            "z"
+        ],
+        "combined_entropy": "e44d698c774d3b28ba630c4434a1f0605d4d02ce5bdfa83ce2cb9f33352d0ddc",
+        "contributions": [
+            {
+                "source": "VRFEntropy",
+                "source_id": "vrf",
+                "value": "37a35935ba0983d57a9896fe03e47f550a44bc586074406e7ae3ee7185e342aa"
+            },
+            {
+                "source": "BeaconEntropy",
+                "source_id": "beacon",
+                "value": "09e7c7fadbb69e31f41a233287b0a58c3c8d53d6bfab3009b516195221565c29"
+            },
+            {
+                "source": "DefaultEntropy",
+                "source_id": "bbbb0000-0000-0000-0000-000000000002",
+                "value": "126a203b972056c01c15ebc163b0037b4d8cd58387436de0e15a913c74fe13a3"
+            },
+            {
+                "source": "ParticipantEntropy",
+                "source_id": "aaaa0000-0000-0000-0000-000000000001",
+                "value": "f96b3e2b2894159a6f1d84fe5ee9fb63bd5f36fc7328e8b7c1b75f58f896a057"
+            }
+        ],
+        "result": "x"
+    },
+    "shuffle": {
+        "entropy": "9ed68f0ca3d1c9aabb0fc8f86e933fb613c59ab7656985e96e08d2d35c26306d",
+        "items": [
+            "alice",
+            "bob",
+            "carol",
+            "dave"
+        ],
+        "result": [
+            "dave",
+            "carol",
+            "alice",
+            "bob"
+        ]
+    },
+    "uniformChoice": {
+        "choices": [
+            "alpha",
+            "beta",
+            "gamma",
+            "delta"
+        ],
+        "entropy": "9ed68f0ca3d1c9aabb0fc8f86e933fb613c59ab7656985e96e08d2d35c26306d",
+        "result": "beta"
+    },
+    "weightedChoice": {
+        "choices": [
+            {
+                "label": "red",
+                "weight": 1
+            },
+            {
+                "label": "green",
+                "weight": 2
+            },
+            {
+                "label": "blue",
+                "weight": 3
+            }
+        ],
+        "entropy": "9ed68f0ca3d1c9aabb0fc8f86e933fb613c59ab7656985e96e08d2d35c26306d",
+        "result": "green"
+    }
+}

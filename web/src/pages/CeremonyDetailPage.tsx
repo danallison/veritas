@@ -6,6 +6,7 @@ import CommitForm from '../components/CommitForm'
 import RevealForm from '../components/RevealForm'
 import OutcomeDisplay from '../components/OutcomeDisplay'
 import AuditLog from '../components/AuditLog'
+import VerificationData from '../components/VerificationData'
 import type { EntropyMethod } from '../api/types'
 
 const METHOD_LABELS: Record<EntropyMethod, string> = {
@@ -101,6 +102,14 @@ export default function CeremonyDetailPage() {
 
       {ceremony.phase === 'Finalized' && (
         <OutcomeDisplay ceremonyId={id} ceremonyType={ceremony.ceremony_type} />
+      )}
+
+      {ceremony.phase === 'Finalized' && (
+        <VerificationData
+          ceremonyId={id}
+          entropyMethod={ceremony.entropy_method}
+          ceremonyType={ceremony.ceremony_type}
+        />
       )}
 
       {(ceremony.phase === 'Expired' || ceremony.phase === 'Cancelled' || ceremony.phase === 'Disputed') && (
