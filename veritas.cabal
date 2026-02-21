@@ -2,7 +2,7 @@ cabal-version:      3.0
 name:               veritas
 version:            0.1.0.0
 synopsis:           Verifiable social randomness service
-license:            BSD-3-Clause
+license:            MIT
 build-type:         Simple
 
 common common-deps
