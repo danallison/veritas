@@ -51,6 +51,10 @@ module Veritas.DB.Queries
   , parseEntropyMethod
   , parseCommitmentMode
   , parseNonParticipationPolicy
+  , showPhase
+  , showEntropyMethod
+  , showCommitmentMode
+  , showNonParticipationPolicy
 
     -- * Row types
   , CeremonyRow(..)

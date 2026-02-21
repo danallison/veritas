@@ -121,6 +121,9 @@ test-suite veritas-tests
     Properties.AuditLogProperties
     Properties.CommitRevealProperties
     Properties.StatisticalProperties
+    Veritas.API.HandlersSpec
+    Veritas.DB.QueriesSpec
+    Veritas.Workers.BeaconFetcherSpec
   ghc-options:
     -threaded
     -rtsopts

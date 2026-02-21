@@ -57,21 +57,25 @@ function eventDescription(
   }
 }
 
+export { eventDescription, participantLabel }
+
 export default function AuditLog({
   ceremonyId,
   participants,
+  phase,
 }: {
   ceremonyId: string
   participants: CommittedParticipant[]
+  phase: string
 }) {
   const [log, setLog] = useState<AuditLogResponse | null>(null)
   const [expanded, setExpanded] = useState(false)
 
   useEffect(() => {
-    if (expanded && !log) {
+    if (expanded) {
       api.getAuditLog(ceremonyId).then(setLog)
     }
-  }, [expanded, ceremonyId, log])
+  }, [expanded, ceremonyId, phase])
 
   return (
     <div className="border border-gray-200 rounded-lg">

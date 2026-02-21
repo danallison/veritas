@@ -15,6 +15,9 @@ import qualified Properties.ResolutionProperties
 import qualified Properties.AuditLogProperties
 import qualified Properties.CommitRevealProperties
 import qualified Properties.StatisticalProperties
+import qualified Veritas.API.HandlersSpec
+import qualified Veritas.DB.QueriesSpec
+import qualified Veritas.Workers.BeaconFetcherSpec
 
 main :: IO ()
 main = hspec $ do
@@ -31,3 +34,6 @@ main = hspec $ do
   describe "Properties.AuditLog" Properties.AuditLogProperties.spec
   describe "Properties.CommitReveal" Properties.CommitRevealProperties.spec
   describe "Properties.Statistical" Properties.StatisticalProperties.spec
+  describe "API.Handlers" Veritas.API.HandlersSpec.spec
+  describe "DB.Queries" Veritas.DB.QueriesSpec.spec
+  describe "Workers.BeaconFetcher" Veritas.Workers.BeaconFetcherSpec.spec

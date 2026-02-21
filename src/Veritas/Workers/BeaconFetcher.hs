@@ -2,6 +2,7 @@
 -- in the AwaitingBeacon phase (Methods B and D).
 module Veritas.Workers.BeaconFetcher
   ( runBeaconFetcher
+  , resolveChainHash
   ) where
 
 import Control.Concurrent (threadDelay)

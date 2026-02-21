@@ -111,7 +111,7 @@ export default function CeremonyDetailPage() {
         </div>
       )}
 
-      <AuditLog ceremonyId={id} participants={ceremony.committed_participants ?? []} />
+      <AuditLog ceremonyId={id} participants={ceremony.committed_participants ?? []} phase={ceremony.phase} />
     </div>
   )
 }
