@@ -7,6 +7,8 @@ import Control.Concurrent (threadDelay)
 import Control.Exception (try, SomeException)
 import Control.Monad (forever, forM_, when)
 import qualified Data.Aeson as Aeson
+import Data.Text (Text)
+import qualified Data.Text as T
 import Database.PostgreSQL.Simple (Connection)
 import Katip
 
@@ -30,32 +32,49 @@ runAutoResolver logEnv pool keyPair intervalSeconds = forever $ do
         case mrow of
           Nothing -> pure ()
           Just row -> do
-            contributions <- gatherEntropy conn' (CeremonyId cid) row keyPair
+            case Aeson.fromJSON (Q.crCeremonyType row) of
+              Aeson.Error msg -> do
+                runKatipT logEnv $
+                  logMsg "worker.resolver" ErrorS (ls ("Failed to parse ceremony_type for " <> show cid <> ": " <> msg))
+                disputeCeremony conn' logEnv (CeremonyId cid) ("Failed to parse ceremony_type: " <> showT msg)
+              Aeson.Success ctype -> do
+                contributions <- gatherEntropy conn' logEnv (CeremonyId cid) row keyPair
 
-            -- Log VRF generation for officiant_vrf method
-            when (Q.crEntropyMethod row == "officiant_vrf") $
-              case contributions of
-                [ec] | VRFEntropy vrfOut <- ecSource ec ->
-                  Q.appendAuditLog conn' (CeremonyId cid) (VRFGenerated vrfOut)
-                _ -> pure ()
+                if null contributions
+                then disputeCeremony conn' logEnv (CeremonyId cid) "No entropy contributions available"
+                else do
+                  -- Log VRF generation for officiant_vrf method
+                  when (Q.crEntropyMethod row == "officiant_vrf") $
+                    case contributions of
+                      [ec] | VRFEntropy vrfOut <- ecSource ec ->
+                        Q.appendAuditLog conn' (CeremonyId cid) (VRFGenerated vrfOut)
+                      _ -> pure ()
 
-            let ctype = case Aeson.fromJSON (Q.crCeremonyType row) of
-                  Aeson.Success ct -> ct
-                  _                -> CoinFlip
-                outcome = resolve ctype contributions
+                  let outcome = resolve ctype contributions
 
-            Q.insertOutcome conn' (CeremonyId cid) outcome
-            Q.updateCeremonyPhase conn' (CeremonyId cid) Finalized
-            Q.appendAuditLog conn' (CeremonyId cid) (CeremonyResolved outcome)
-            Q.appendAuditLog conn' (CeremonyId cid) CeremonyFinalized
+                  Q.insertOutcome conn' (CeremonyId cid) outcome
+                  Q.updateCeremonyPhase conn' (CeremonyId cid) Finalized
+                  Q.appendAuditLog conn' (CeremonyId cid) (CeremonyResolved outcome)
+                  Q.appendAuditLog conn' (CeremonyId cid) CeremonyFinalized
   case result of
     Left err -> runKatipT logEnv $
       logMsg "worker.resolver" ErrorS (showLS err)
     Right () -> pure ()
 
+-- | Move a ceremony to the Disputed phase with a reason
+disputeCeremony :: Connection -> LogEnv -> CeremonyId -> Text -> IO ()
+disputeCeremony conn logEnv cid reason = do
+  Q.updateCeremonyPhase conn cid Disputed
+  Q.appendAuditLog conn cid (CeremonyDisputed reason)
+  runKatipT logEnv $
+    logMsg "worker.resolver" WarningS (ls ("Ceremony disputed: " <> show cid <> " — " <> show reason))
+
+showT :: Show a => a -> Text
+showT = T.pack . show
+
 -- | Gather entropy contributions for a ceremony based on its method
-gatherEntropy :: Connection -> CeremonyId -> Q.CeremonyRow -> KeyPair -> IO [EntropyContribution]
-gatherEntropy conn cid row keyPair = case Q.crEntropyMethod row of
+gatherEntropy :: Connection -> LogEnv -> CeremonyId -> Q.CeremonyRow -> KeyPair -> IO [EntropyContribution]
+gatherEntropy conn logEnv cid row keyPair = case Q.crEntropyMethod row of
   "officiant_vrf" -> do
     let vrfOut = generateVRF keyPair cid
     pure [EntropyContribution
@@ -66,58 +85,43 @@ gatherEntropy conn cid row keyPair = case Q.crEntropyMethod row of
 
   "participant_reveal" -> do
     reveals <- Q.getEntropyReveals conn cid
-    pure [ EntropyContribution
-             { ecCeremony = cid
-             , ecSource = if isDefault
-                          then DefaultEntropy (ParticipantId pid)
-                          else ParticipantEntropy (ParticipantId pid)
-             , ecValue = val
-             }
-         | (pid, val, isDefault, _published) <- reveals
-         ]
+    pure $ Q.revealsToContributions cid reveals
 
   "combined" -> do
     reveals <- Q.getEntropyReveals conn cid
-    let participantContributions =
-          [ EntropyContribution
-              { ecCeremony = cid
-              , ecSource = if isDefault
-                           then DefaultEntropy (ParticipantId pid)
-                           else ParticipantEntropy (ParticipantId pid)
-              , ecValue = val
-              }
-          | (pid, val, isDefault, _published) <- reveals
-          ]
+    let participantContributions = Q.revealsToContributions cid reveals
     mbeacon <- Q.getBeaconAnchor conn cid
-    let beaconContributions = case mbeacon of
-          Nothing -> []
-          Just bar -> [EntropyContribution
-            { ecCeremony = cid
-            , ecSource = BeaconEntropy BeaconAnchor
-                { baNetwork = Q.barNetwork bar
-                , baRound = fromIntegral (Q.barRound bar)
-                , baValue = Q.barValue bar
-                , baSignature = Q.barSignature bar
-                , baFetchedAt = Q.barFetchedAt bar
-                }
-            , ecValue = Q.barValue bar
-            }]
-    pure (participantContributions ++ beaconContributions)
+    case mbeacon of
+      Nothing -> do
+        runKatipT logEnv $
+          logMsg "worker.resolver" ErrorS
+            (ls ("Combined method: no beacon anchor for ceremony " <> show cid))
+        pure []  -- caller will dispute due to empty contributions
+      Just bar ->
+        pure (participantContributions ++ [beaconRowToContribution cid bar])
 
   "external_beacon" -> do
     mbeacon <- Q.getBeaconAnchor conn cid
     case mbeacon of
-      Nothing -> pure []
-      Just bar -> pure [EntropyContribution
-        { ecCeremony = cid
-        , ecSource = BeaconEntropy BeaconAnchor
-            { baNetwork = Q.barNetwork bar
-            , baRound = fromIntegral (Q.barRound bar)
-            , baValue = Q.barValue bar
-            , baSignature = Q.barSignature bar
-            , baFetchedAt = Q.barFetchedAt bar
-            }
-        , ecValue = Q.barValue bar
-        }]
+      Nothing -> do
+        runKatipT logEnv $
+          logMsg "worker.resolver" ErrorS
+            (ls ("External beacon: no beacon anchor for ceremony " <> show cid))
+        pure []  -- caller will dispute due to empty contributions
+      Just bar -> pure [beaconRowToContribution cid bar]
 
   _ -> pure []
+
+-- | Convert a beacon anchor row to an entropy contribution
+beaconRowToContribution :: CeremonyId -> Q.BeaconAnchorRow -> EntropyContribution
+beaconRowToContribution cid bar = EntropyContribution
+  { ecCeremony = cid
+  , ecSource = BeaconEntropy BeaconAnchor
+      { baNetwork = Q.barNetwork bar
+      , baRound = fromIntegral (Q.barRound bar)
+      , baValue = Q.barValue bar
+      , baSignature = Q.barSignature bar
+      , baFetchedAt = Q.barFetchedAt bar
+      }
+  , ecValue = Q.barValue bar
+  }

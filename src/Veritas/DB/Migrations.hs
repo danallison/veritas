@@ -16,6 +16,14 @@ runMigrations conn = do
   execute_ conn createAuditLogTable
   execute_ conn "ALTER TABLE commitments ADD COLUMN IF NOT EXISTS display_name TEXT"
   execute_ conn "ALTER TABLE commitments DROP COLUMN IF EXISTS signature"
+  -- Issue #2: Audit log determinism — sequence_num and created_at must be
+  -- supplied by the application so that hashes are reproducible.
+  execute_ conn "ALTER TABLE audit_log ALTER COLUMN sequence_num DROP DEFAULT"
+  execute_ conn "ALTER TABLE audit_log ALTER COLUMN created_at DROP DEFAULT"
+  -- Issue #8: Missing indexes for worker queries
+  execute_ conn "CREATE INDEX IF NOT EXISTS idx_ceremonies_phase ON ceremonies(phase)"
+  execute_ conn "CREATE INDEX IF NOT EXISTS idx_ceremonies_phase_commit_deadline ON ceremonies(phase, commit_deadline)"
+  execute_ conn "CREATE INDEX IF NOT EXISTS idx_ceremonies_phase_reveal_deadline ON ceremonies(phase, reveal_deadline)"
   pure ()
 
 createCeremoniesTable :: Query
@@ -86,13 +94,13 @@ createOutcomesTable =
 createAuditLogTable :: Query
 createAuditLogTable =
   "CREATE TABLE IF NOT EXISTS audit_log (\
-  \  sequence_num     BIGSERIAL,\
+  \  sequence_num     BIGINT NOT NULL,\
   \  ceremony_id      UUID NOT NULL REFERENCES ceremonies(id),\
   \  event_type       TEXT NOT NULL,\
   \  event_data       JSONB NOT NULL,\
   \  prev_hash        BYTEA NOT NULL,\
   \  entry_hash       BYTEA NOT NULL,\
-  \  created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),\
+  \  created_at       TIMESTAMPTZ NOT NULL,\
   \  PRIMARY KEY (ceremony_id, sequence_num)\
   \)"
 

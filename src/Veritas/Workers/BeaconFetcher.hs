@@ -10,6 +10,7 @@ import Control.Exception (try, SomeException)
 import Control.Monad (forever, forM_)
 import qualified Data.Aeson as Aeson
 import Data.Text (Text)
+import Data.Time (addUTCTime)
 import Katip
 
 import Veritas.Config (DrandConfig(..))
@@ -83,9 +84,25 @@ handleFallback logEnv pool drandCfg cid spec depth err = do
   runKatipT logEnv $
     logMsg "worker.beacon.fallback" WarningS (showLS err)
   case beaconFallback spec of
-    ExtendDeadline _ ->
-      -- Do nothing — the worker will retry on the next poll cycle
-      pure ()
+    ExtendDeadline duration -> do
+      extendResult <- try @SomeException $ withConnection pool $ \conn ->
+        withSerializableTransaction conn $ \conn' -> do
+          mrow <- Q.getCeremony conn' cid
+          case mrow of
+            Nothing -> pure ()
+            Just row -> do
+              let currentDeadline = case Q.crRevealDeadline row of
+                    Just rd -> rd
+                    Nothing -> Q.crCommitDeadline row
+                  newDeadline = addUTCTime duration currentDeadline
+              Q.updateRevealDeadline conn' cid newDeadline
+              Q.appendAuditLog conn' cid (DeadlineExtended duration newDeadline)
+              runKatipT logEnv $
+                logMsg "worker.beacon.extend" InfoS (ls ("Extended deadline for ceremony " <> show cid <> " to " <> show newDeadline))
+      case extendResult of
+        Left extErr -> runKatipT logEnv $
+          logMsg "worker.beacon.extend" ErrorS (showLS extErr)
+        Right () -> pure ()
     AlternateSource altSpec ->
       fetchAndAnchor logEnv pool drandCfg cid altSpec (depth + 1)
     CancelCeremony ->

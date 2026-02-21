@@ -2,101 +2,53 @@
 
 ## Open
 
-### 1) [High] Audit verification is incomplete
-**Problem:** `GET /ceremonies/:id/verify` checks only `prev_hash` chaining and does not recompute each entry hash from persisted event data.
-
-**Where:**
-- `src/Veritas/API/Handlers.hs` (`verifyHashChain`)
-- `src/Veritas/Core/AuditLog.hs` (`verifyEntry` exists but is not used by API verification)
-
----
-
-### 2) [High] Audit hash inputs are not fully persisted for deterministic recomputation
-**Problem:** Entry hash computation includes sequence number and timestamp, but inserts rely on DB-generated `BIGSERIAL`/`NOW()` while hash is computed in app code before insert. This can break deterministic external verification from stored rows.
-
-**Where:**
-- `src/Veritas/Core/AuditLog.hs` (`computeEntryHash` includes sequence and timestamp)
-- `src/Veritas/DB/Queries.hs` (`insertAuditLogEntry`, `appendAuditLog`)
-- `src/Veritas/DB/Migrations.hs` (`audit_log.sequence_num BIGSERIAL`, `created_at DEFAULT NOW()`)
-
----
-
-### 3) [Medium] `ExtendDeadline` beacon fallback is not implemented
-**Problem:** `ExtendDeadline _` currently does nothing; it just retries on next worker cycle without updating any deadline.
-
-**Where:**
-- `src/Veritas/Workers/BeaconFetcher.hs`
-
----
-
-### 4) [Medium] Fail-open parsing defaults in DB domain conversion
-**Problem:** Unknown DB values silently map to defaults (`Pending`, `OfficiantVRF`, `Cancellation`) instead of failing closed.
-
-**Where:**
-- `src/Veritas/DB/Queries.hs` (`parsePhase`, `parseEntropyMethod`, `parseNonParticipationPolicy`)
-
----
-
-### 5) [High] `AutoResolver` degrades silently on malformed/missing data
-**Problem:** Invalid `ceremony_type` falls back to `CoinFlip`, and missing beacon in beacon-based methods can produce empty contribution lists instead of failing.
-
-**Where:**
-- `src/Veritas/Workers/AutoResolver.hs` (`Aeson.fromJSON` fallback to `CoinFlip`)
-- `src/Veritas/Workers/AutoResolver.hs` (`Nothing -> pure []` for missing beacon)
-- `src/Veritas/Core/Resolution.hs` (`combineEntropy [] = sha256 "veritas-empty-entropy"`)
-
----
-
-### 6) [Medium] Missing temporal validation on ceremony creation
-**Problem:** Validation enforces field presence/absence by method, but not temporal consistency (`commit_deadline < reveal_deadline`, deadlines in future, etc.).
-
-**Where:**
-- `src/Veritas/API/Handlers.hs` (`createCeremony`, `validateMethodParams`)
-
----
-
-### 7) [Medium] N+1 query pattern in ceremony listing
-**Problem:** Listing ceremonies performs per-row follow-up queries for commitment counts and participant lists.
-
-**Where:**
-- `src/Veritas/API/Handlers.hs` (`listCeremoniesH`)
-
----
-
-### 8) [Medium] Missing indexes for worker hot-path queries
-**Problem:** Worker loops filter by `phase`, `commit_deadline`, and `reveal_deadline` but schema migrations define no supporting indexes.
-
-**Where:**
-- `src/Veritas/DB/Queries.hs` (`getPendingExpiredCeremonies`, `getResolvingCeremonies`, `getAwaitingBeaconCeremonies`, `getAwaitingRevealsCeremonies`)
-- `src/Veritas/DB/Migrations.hs` (no `CREATE INDEX` statements)
-
----
-
-### 9) [Medium] Sensitive entropy material is stored in `localStorage`
-**Problem:** Commit/reveal entropy and seals are persisted client-side in `localStorage`, increasing exposure under XSS.
-
-**Where:**
-- `web/src/hooks/useCeremonySecrets.ts`
-
----
-
-### 10) [Low] Duplicate key warning in frontend audit log rendering
-**Problem:** Frontend tests surface React warning for duplicate row keys in `AuditLog` table rendering.
-
-**Where:**
-- `web/src/components/AuditLog.tsx` (`key={entry.sequence_num}`)
-
----
-
-### 11) [Low] README/API route mismatch for public key endpoint
-**Problem:** README documents `GET /pubkey`, but API exposes `GET /server/pubkey`.
-
-**Where:**
-- `README.md`
-- `src/Veritas/API/Types.hs`
-
+(none)
 
 ## Resolved (Historical)
+
+### 6. ~~Audit hash inputs are not fully persisted for deterministic recomputation~~
+**Files:** `src/Veritas/DB/Migrations.hs`, `src/Veritas/DB/Queries.hs`
+**Fix:** Dropped DB defaults for `sequence_num` and `created_at` on `audit_log`. `appendAuditLog` now computes both app-side and passes them explicitly in the INSERT, ensuring the hash inputs match the stored values.
+
+### 7. ~~Audit verification is incomplete~~
+**Files:** `src/Veritas/API/Handlers.hs`, `src/Veritas/Core/Types.hs`
+**Fix:** `verifyHashChain` now parses `event_data` JSON back to `CeremonyEvent`, recomputes each entry hash via `computeEntryHash`, and compares to the stored hash. Added `FromJSON` instances for `CeremonyEvent` and its sub-types.
+
+### 8. ~~Fail-open parsing defaults in DB domain conversion~~
+**File:** `src/Veritas/DB/Queries.hs`
+**Fix:** Changed `parsePhase`, `parseEntropyMethod`, `parseCommitmentMode`, and `parseNonParticipationPolicy` to call `error` on unknown values instead of silently defaulting.
+
+### 9. ~~`AutoResolver` degrades silently on malformed/missing data~~
+**Files:** `src/Veritas/Workers/AutoResolver.hs`, `src/Veritas/Core/Resolution.hs`
+**Fix:** Invalid `ceremony_type` now logs an error and disputes the ceremony instead of falling back to `CoinFlip`. Empty contribution lists (from missing beacons) now dispute the ceremony. `combineEntropy []` is now an `error` as a safety net.
+
+### 10. ~~Missing temporal validation on ceremony creation~~
+**Files:** `src/Veritas/API/Handlers.hs`, `test/Veritas/API/HandlersSpec.hs`
+**Fix:** Added `validateTemporalConstraints` checking that deadlines are in the future and `reveal_deadline > commit_deadline`. Called during `createCeremony`.
+
+### 11. ~~N+1 query pattern in ceremony listing~~
+**Files:** `src/Veritas/DB/Queries.hs`, `src/Veritas/API/Handlers.hs`
+**Fix:** Added `getCommitmentCountsBatch` and `getCommittedParticipantsBatch` batch queries. `listCeremoniesH` now uses 3 queries total instead of 1 + 2N.
+
+### 12. ~~Missing indexes for worker hot-path queries~~
+**File:** `src/Veritas/DB/Migrations.hs`
+**Fix:** Added indexes on `ceremonies(phase)`, `ceremonies(phase, commit_deadline)`, and `ceremonies(phase, reveal_deadline)`.
+
+### 13. ~~`ExtendDeadline` beacon fallback is not implemented~~
+**Files:** `src/Veritas/Workers/BeaconFetcher.hs`, `src/Veritas/DB/Queries.hs`, `src/Veritas/Core/Types.hs`
+**Fix:** Implemented the `ExtendDeadline` fallback: reads current deadline, extends it, updates DB, and appends a `DeadlineExtended` audit log entry. Added `DeadlineExtended` event variant and `updateRevealDeadline` query.
+
+### 14. ~~Sensitive entropy material stored in `localStorage`~~
+**Files:** `web/src/hooks/useCeremonySecrets.ts`, `web/src/hooks/useCeremonySecrets.test.ts`
+**Fix:** Replaced `localStorage` with `sessionStorage` to limit exposure to current tab session.
+
+### 15. ~~Duplicate key warning in frontend audit log rendering~~
+**File:** `web/src/components/AuditLog.tsx`
+**Fix:** Changed `key={entry.sequence_num}` to `key={entry.entry_hash}` (guaranteed unique).
+
+### 16. ~~README/API route mismatch for public key endpoint~~
+**File:** `README.md`
+**Fix:** Changed `GET /pubkey` to `GET /server/pubkey` to match actual API route.
 
 ### 1. ~~`textToBS` does ASCII byte conversion instead of hex decode~~
 **File:** `src/Veritas/Core/Types.hs`

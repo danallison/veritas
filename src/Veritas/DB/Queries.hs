@@ -11,6 +11,8 @@ module Veritas.DB.Queries
   , getCommitments
   , getCommitmentCount
   , getCommittedParticipants
+  , getCommitmentCountsBatch
+  , getCommittedParticipantsBatch
   , CommittedParticipant(..)
 
     -- * Entropy Reveals
@@ -33,6 +35,9 @@ module Veritas.DB.Queries
   , getLastAuditLogEntry
   , appendAuditLog
   , eventTypeName
+
+    -- * Ceremony Updates
+  , updateRevealDeadline
 
     -- * Worker Queries
   , getPendingExpiredCeremonies
@@ -68,6 +73,7 @@ import Data.Aeson (Value, toJSON)
 import qualified Data.Aeson as Aeson
 import Data.ByteString (ByteString)
 import Data.Text (Text)
+import qualified Data.Text as T
 import Data.Time (UTCTime, getCurrentTime)
 import Data.UUID (UUID)
 import Database.PostgreSQL.Simple
@@ -134,6 +140,13 @@ updateCeremonyPhase conn (CeremonyId cid) newPhase = do
     (showPhase newPhase, cid)
   pure ()
 
+updateRevealDeadline :: Connection -> CeremonyId -> UTCTime -> IO ()
+updateRevealDeadline conn (CeremonyId cid) newDeadline = do
+  _ <- execute conn
+    "UPDATE ceremonies SET reveal_deadline = ? WHERE id = ?"
+    (newDeadline, cid)
+  pure ()
+
 -- === Commitments ===
 
 insertCommitment :: Connection -> Commitment -> Maybe Text -> IO ()
@@ -176,6 +189,21 @@ getCommittedParticipants conn (CeremonyId cid) =
   query conn
     "SELECT participant_id, display_name FROM commitments WHERE ceremony_id = ? ORDER BY committed_at"
     (Only cid)
+
+getCommitmentCountsBatch :: Connection -> [CeremonyId] -> IO [(UUID, Int)]
+getCommitmentCountsBatch _ [] = pure []
+getCommitmentCountsBatch conn cids =
+  query conn
+    "SELECT ceremony_id, COUNT(*)::int FROM commitments WHERE ceremony_id IN ? GROUP BY ceremony_id"
+    (Only (In (map unCeremonyId cids)))
+
+getCommittedParticipantsBatch :: Connection -> [CeremonyId] -> IO [(UUID, UUID, Maybe Text)]
+getCommittedParticipantsBatch _ [] = pure []
+getCommittedParticipantsBatch conn cids =
+  query conn
+    "SELECT ceremony_id, participant_id, display_name FROM commitments \
+    \WHERE ceremony_id IN ? ORDER BY committed_at"
+    (Only (In (map unCeremonyId cids)))
 
 -- === Entropy Reveals ===
 
@@ -247,12 +275,12 @@ getOutcome conn (CeremonyId cid) =
 
 -- === Audit Log ===
 
-insertAuditLogEntry :: Connection -> CeremonyId -> Text -> Value -> ByteString -> ByteString -> IO ()
-insertAuditLogEntry conn (CeremonyId cid) eventType eventData prevHash entryHash = do
+insertAuditLogEntry :: Connection -> CeremonyId -> Int -> Text -> Value -> ByteString -> ByteString -> UTCTime -> IO ()
+insertAuditLogEntry conn (CeremonyId cid) seqNum eventType eventData prevHash entryHash createdAt = do
   _ <- execute conn
-    "INSERT INTO audit_log (ceremony_id, event_type, event_data, prev_hash, entry_hash) \
-    \VALUES (?, ?, ?, ?, ?)"
-    (cid, eventType, eventData, Binary prevHash, Binary entryHash)
+    "INSERT INTO audit_log (sequence_num, ceremony_id, event_type, event_data, prev_hash, entry_hash, created_at) \
+    \VALUES (?, ?, ?, ?, ?, ?, ?)"
+    (seqNum, cid, eventType, eventData, Binary prevHash, Binary entryHash, createdAt)
   pure ()
 
 getAuditLog :: Connection -> CeremonyId -> IO [AuditLogRow]
@@ -426,7 +454,7 @@ appendAuditLog conn cid event = do
   let prevHash = maybe genesisHash alrEntryHash mlast
       seqNum = maybe 0 (\e -> alrSequenceNum e + 1) mlast
       entry = createLogEntry (LogSequence (fromIntegral seqNum)) cid event now prevHash
-  insertAuditLogEntry conn cid (eventTypeName event) (toJSON event) prevHash (logEntryHash entry)
+  insertAuditLogEntry conn cid seqNum (eventTypeName event) (toJSON event) prevHash (logEntryHash entry) now
 
 eventTypeName :: CeremonyEvent -> Text
 eventTypeName = \case
@@ -442,6 +470,7 @@ eventTypeName = \case
   CeremonyExpired            -> "ceremony_expired"
   CeremonyCancelled{}        -> "ceremony_cancelled"
   CeremonyDisputed{}         -> "ceremony_disputed"
+  DeadlineExtended{}         -> "deadline_extended"
 
 parsePhase :: Text -> Phase
 parsePhase = \case
@@ -453,7 +482,7 @@ parsePhase = \case
   "expired"          -> Expired
   "cancelled"        -> Cancelled
   "disputed"         -> Disputed
-  _                  -> Pending
+  x                  -> error ("Unknown phase: " <> T.unpack x)
 
 parseEntropyMethod :: Text -> EntropyMethod
 parseEntropyMethod = \case
@@ -461,18 +490,20 @@ parseEntropyMethod = \case
   "external_beacon"    -> ExternalBeacon
   "officiant_vrf"      -> OfficiantVRF
   "combined"           -> Combined
-  _                    -> OfficiantVRF
+  x                    -> error ("Unknown entropy method: " <> T.unpack x)
 
 parseCommitmentMode :: Text -> CommitmentMode
 parseCommitmentMode = \case
+  "immediate"     -> Immediate
   "deadline_wait" -> DeadlineWait
-  _               -> Immediate
+  x               -> error ("Unknown commitment mode: " <> T.unpack x)
 
 parseNonParticipationPolicy :: Text -> NonParticipationPolicy
 parseNonParticipationPolicy = \case
   "default_substitution" -> DefaultSubstitution
   "exclusion"            -> Exclusion
-  _                      -> Cancellation
+  "cancellation"         -> Cancellation
+  x                      -> error ("Unknown non-participation policy: " <> T.unpack x)
 
 -- === Helpers ===
 

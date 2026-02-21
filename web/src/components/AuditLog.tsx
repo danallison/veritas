@@ -102,7 +102,7 @@ export default function AuditLog({
                 </thead>
                 <tbody>
                   {log.entries.map((entry, i) => (
-                    <tr key={entry.sequence_num} className="border-b border-gray-100">
+                    <tr key={entry.entry_hash} className="border-b border-gray-100">
                       <td className="py-1 pr-2 text-gray-400">{i + 1}</td>
                       <td className="py-1 pr-2">{eventDescription(entry, participants)}</td>
                       <td className="py-1 pr-2 font-mono text-gray-500" title={entry.entry_hash}>

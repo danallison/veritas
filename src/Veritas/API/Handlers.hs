@@ -6,6 +6,7 @@ module Veritas.API.Handlers
   , validateTwoPartySafety
   , validateMethodParams
   , validateBeaconSpec
+  , validateTemporalConstraints
   ) where
 
 import Control.Monad (when)
@@ -15,7 +16,9 @@ import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BS8
 import qualified Data.ByteString.Lazy as LBS
 import Data.List (find)
+import qualified Data.Map.Strict as Map
 import Data.Text (Text)
+import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import Data.ByteArray.Encoding (Base(..), convertFromBase)
 import Data.Time (UTCTime, getCurrentTime)
@@ -30,6 +33,8 @@ import Veritas.Core.StateMachine (Action(..), TransitionResult(..), transition)
 import Veritas.Core.Resolution (resolve, deriveIntRange)
 import Veritas.Core.Entropy (verifySealForReveal)
 import qualified Crypto.Random
+import qualified Data.Aeson as Aeson
+import Veritas.Core.AuditLog (computeEntryHash)
 import Veritas.Crypto.Hash (genesisHash, deriveUniform)
 import Veritas.Crypto.VRF (generateVRF)
 import Veritas.Crypto.Signatures (KeyPair(..), publicKeyBytes)
@@ -95,6 +100,12 @@ createCeremony AppEnv{..} req = do
     Right () -> pure ()
 
   now <- liftIO getCurrentTime
+
+  -- Temporal constraint validation
+  case validateTemporalConstraints now (crqCommitDeadline req) (crqRevealDeadline req) of
+    Left msg -> throwError err400 { errBody = LBS.fromStrict (TE.encodeUtf8 msg) }
+    Right () -> pure ()
+
   cid <- liftIO UUID4.nextRandom
   creator <- case crqCreatedBy req of
     Just pid -> pure pid
@@ -170,6 +181,19 @@ validateBeaconSpec method mSpec = case method of
     Just _  -> Left "beacon_spec is only for ExternalBeacon and Combined methods"
     Nothing -> Right ()
 
+-- | Validate that deadlines are in the future and properly ordered.
+validateTemporalConstraints :: UTCTime -> UTCTime -> Maybe UTCTime -> Either Text ()
+validateTemporalConstraints now commitDeadline' mRevealDeadline = do
+  when (commitDeadline' <= now) $
+    Left "commit_deadline must be in the future"
+  case mRevealDeadline of
+    Just revealDeadline' -> do
+      when (revealDeadline' <= now) $
+        Left "reveal_deadline must be in the future"
+      when (revealDeadline' <= commitDeadline') $
+        Left "reveal_deadline must be after commit_deadline"
+    Nothing -> Right ()
+
 getCeremonyH :: AppEnv -> UUID -> Handler CeremonyResponse
 getCeremonyH AppEnv{..} cid = do
   mrow <- liftIO $ withConnection envPool $ \conn -> Q.getCeremony conn (CeremonyId cid)
@@ -184,14 +208,19 @@ getCeremonyH AppEnv{..} cid = do
 
 listCeremoniesH :: AppEnv -> Maybe Text -> Handler [CeremonyResponse]
 listCeremoniesH AppEnv{..} phaseFilter = do
-  rows <- liftIO $ withConnection envPool $ \conn -> Q.listCeremonies conn phaseFilter
-  liftIO $ withConnection envPool $ \conn ->
-    mapM (\row -> do
-      let cid = CeremonyId (Q.crId row)
-      count <- Q.getCommitmentCount conn cid
-      participants <- Q.getCommittedParticipants conn cid
-      pure $ ceremonyRowToResponse row count participants
-    ) rows
+  liftIO $ withConnection envPool $ \conn -> do
+    rows <- Q.listCeremonies conn phaseFilter
+    let cids = map (CeremonyId . Q.crId) rows
+    countRows <- Q.getCommitmentCountsBatch conn cids
+    partRows <- Q.getCommittedParticipantsBatch conn cids
+    let countMap = Map.fromList countRows
+        partMap = Map.fromListWith (flip (++)) [(cid', [Q.CommittedParticipant pid dn]) | (cid', pid, dn) <- partRows]
+    pure $ map (\row ->
+      let uid = Q.crId row
+          count = Map.findWithDefault 0 uid countMap
+          participants = Map.findWithDefault [] uid partMap
+      in ceremonyRowToResponse row count participants
+      ) rows
 
 commitToCeremony :: AppEnv -> UUID -> CommitRequest -> Handler CommitResponse
 commitToCeremony AppEnv{..} cid req = do
@@ -326,9 +355,8 @@ getAuditLogH AppEnv{..} cid = do
 verifyCeremony :: AppEnv -> UUID -> Handler VerifyResponse
 verifyCeremony AppEnv{..} cid = do
   rows <- liftIO $ withConnection envPool $ \conn -> Q.getAuditLog conn (CeremonyId cid)
-  let isValid = verifyHashChain rows
-      errs = if isValid then [] else ["Hash chain integrity check failed"]
-  pure VerifyResponse { vrValid = isValid, vrErrors = errs }
+  let errs = verifyHashChain rows
+  pure VerifyResponse { vrValid = null errs, vrErrors = errs }
 
 -- === Standalone Random ===
 
@@ -430,14 +458,35 @@ auditLogRowToResponse Q.AuditLogRow{..} = AuditLogEntryResponse
   , alerCreatedAt = alrCreatedAt
   }
 
-verifyHashChain :: [Q.AuditLogRow] -> Bool
-verifyHashChain [] = True
+verifyHashChain :: [Q.AuditLogRow] -> [Text]
+verifyHashChain [] = []
 verifyHashChain rows = go genesisHash rows
   where
-    go _ [] = True
+    go _ [] = []
     go expectedPrev (r:rs)
-      | Q.alrPrevHash r /= expectedPrev = False
-      | otherwise = go (Q.alrEntryHash r) rs
+      | Q.alrPrevHash r /= expectedPrev =
+          ("Entry " <> showT (Q.alrSequenceNum r) <> ": prev_hash mismatch") : go (Q.alrEntryHash r) rs
+      | otherwise = case verifyEntryHash r of
+          Nothing  -> go (Q.alrEntryHash r) rs
+          Just err -> err : go (Q.alrEntryHash r) rs
+
+    verifyEntryHash r =
+      case Aeson.fromJSON (Q.alrEventData r) of
+        Aeson.Error msg ->
+          Just ("Entry " <> showT (Q.alrSequenceNum r) <> ": failed to parse event_data: " <> showT msg)
+        Aeson.Success event ->
+          let computed = computeEntryHash
+                (LogSequence (fromIntegral (Q.alrSequenceNum r)))
+                (CeremonyId (Q.alrCeremonyId r))
+                event
+                (Q.alrCreatedAt r)
+                (Q.alrPrevHash r)
+          in if computed == Q.alrEntryHash r
+             then Nothing
+             else Just ("Entry " <> showT (Q.alrSequenceNum r) <> ": entry_hash mismatch (recomputed hash differs)")
+
+    showT :: Show a => a -> Text
+    showT = T.pack . show
 
 -- | Generate 32 cryptographically secure random bytes
 generateRandomBytes :: IO ByteString

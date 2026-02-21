@@ -1,11 +1,11 @@
 module Veritas.API.HandlersSpec (spec) where
 
-import Data.Time (UTCTime)
+import Data.Time (UTCTime, addUTCTime)
 import Data.Time.Clock.POSIX (posixSecondsToUTCTime)
 import Test.Hspec
 
 import Veritas.Core.Types
-import Veritas.API.Handlers (validateMethodParams, validateTwoPartySafety, validateBeaconSpec)
+import Veritas.API.Handlers (validateMethodParams, validateTwoPartySafety, validateBeaconSpec, validateTemporalConstraints)
 
 -- Helper: a fixed UTCTime for tests that need a deadline
 someTime :: UTCTime
@@ -126,6 +126,40 @@ spec = do
     it "accepts no beacon_spec for OfficiantVRF" $
       validateBeaconSpec OfficiantVRF Nothing
         `shouldBe` Right ()
+
+  describe "validateTemporalConstraints" $ do
+    let now = someTime
+        future = addUTCTime 3600 now
+        farFuture = addUTCTime 7200 now
+        past = addUTCTime (-3600) now
+
+    it "accepts commit_deadline in the future" $
+      validateTemporalConstraints now future Nothing
+        `shouldBe` Right ()
+
+    it "rejects commit_deadline in the past" $
+      validateTemporalConstraints now past Nothing
+        `shouldSatisfy` isLeft
+
+    it "rejects commit_deadline equal to now" $
+      validateTemporalConstraints now now Nothing
+        `shouldSatisfy` isLeft
+
+    it "accepts valid reveal_deadline after commit_deadline" $
+      validateTemporalConstraints now future (Just farFuture)
+        `shouldBe` Right ()
+
+    it "rejects reveal_deadline before commit_deadline" $
+      validateTemporalConstraints now farFuture (Just future)
+        `shouldSatisfy` isLeft
+
+    it "rejects reveal_deadline in the past" $
+      validateTemporalConstraints now future (Just past)
+        `shouldSatisfy` isLeft
+
+    it "rejects reveal_deadline equal to commit_deadline" $
+      validateTemporalConstraints now future (Just future)
+        `shouldSatisfy` isLeft
 
 -- | Helper: check if an Either is Left
 isLeft :: Either a b -> Bool

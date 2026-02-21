@@ -3,7 +3,7 @@ import { renderHook, act } from '@testing-library/react'
 import { useCeremonySecrets } from './useCeremonySecrets'
 
 beforeEach(() => {
-  localStorage.clear()
+  sessionStorage.clear()
 })
 
 describe('useCeremonySecrets', () => {
@@ -44,7 +44,7 @@ describe('useCeremonySecrets', () => {
       result.current.saveSecrets(secrets)
     })
 
-    const raw = localStorage.getItem(`veritas_secret_${ceremonyId}`)
+    const raw = sessionStorage.getItem(`veritas_secret_${ceremonyId}`)
     expect(raw).not.toBeNull()
     expect(JSON.parse(raw!)).toEqual(secrets)
   })

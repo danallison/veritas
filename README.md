@@ -148,7 +148,7 @@ The backend serves a REST API with OpenAPI 3.0 documentation at `GET /docs`.
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/health` | Health check |
-| `GET` | `/pubkey` | Server public key |
+| `GET` | `/server/pubkey` | Server public key |
 | `GET` | `/verify/beacon` | drand beacon verification guide |
 
 ## Configuration

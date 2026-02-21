@@ -1,5 +1,6 @@
 module Veritas.DB.QueriesSpec (spec) where
 
+import Control.Exception (evaluate)
 import qualified Data.ByteString as BS
 import Data.UUID (fromWords)
 import Test.Hspec
@@ -26,8 +27,8 @@ spec = do
       parsePhase (showPhase Cancelled) `shouldBe` Cancelled
     it "Disputed round-trips" $
       parsePhase (showPhase Disputed) `shouldBe` Disputed
-    it "unknown text defaults to Pending" $
-      parsePhase "bogus" `shouldBe` Pending
+    it "unknown text throws an error" $
+      evaluate (parsePhase "bogus") `shouldThrow` anyErrorCall
 
   describe "parseEntropyMethod / showEntropyMethod round-trip" $ do
     it "ParticipantReveal round-trips" $
@@ -38,16 +39,16 @@ spec = do
       parseEntropyMethod (showEntropyMethod OfficiantVRF) `shouldBe` OfficiantVRF
     it "Combined round-trips" $
       parseEntropyMethod (showEntropyMethod Combined) `shouldBe` Combined
-    it "unknown text defaults to OfficiantVRF" $
-      parseEntropyMethod "bogus" `shouldBe` OfficiantVRF
+    it "unknown text throws an error" $
+      evaluate (parseEntropyMethod "bogus") `shouldThrow` anyErrorCall
 
   describe "parseCommitmentMode / showCommitmentMode round-trip" $ do
     it "Immediate round-trips" $
       parseCommitmentMode (showCommitmentMode Immediate) `shouldBe` Immediate
     it "DeadlineWait round-trips" $
       parseCommitmentMode (showCommitmentMode DeadlineWait) `shouldBe` DeadlineWait
-    it "unknown text defaults to Immediate" $
-      parseCommitmentMode "bogus" `shouldBe` Immediate
+    it "unknown text throws an error" $
+      evaluate (parseCommitmentMode "bogus") `shouldThrow` anyErrorCall
 
   describe "parseNonParticipationPolicy / showNonParticipationPolicy round-trip" $ do
     it "DefaultSubstitution round-trips" $
@@ -59,8 +60,8 @@ spec = do
     it "Cancellation round-trips" $
       parseNonParticipationPolicy (showNonParticipationPolicy Cancellation)
         `shouldBe` Cancellation
-    it "unknown text defaults to Cancellation" $
-      parseNonParticipationPolicy "bogus" `shouldBe` Cancellation
+    it "unknown text throws an error" $
+      evaluate (parseNonParticipationPolicy "bogus") `shouldThrow` anyErrorCall
 
   describe "eventTypeName" $ do
     it "CeremonyCreated" $

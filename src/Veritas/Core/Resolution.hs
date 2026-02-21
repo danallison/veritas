@@ -42,7 +42,7 @@ resolve ctype contributions =
 -- Contributions are sorted by source key for canonical ordering,
 -- concatenated, and hashed with SHA-256 (per protocol Section 3).
 combineEntropy :: [EntropyContribution] -> ByteString
-combineEntropy [] = sha256 "veritas-empty-entropy"
+combineEntropy [] = error "combineEntropy: empty contributions (invariant violation)"
 combineEntropy contributions =
   let sorted = sortBy (comparing sourceKey) contributions
   in sha256 (BS.concat (map ecValue sorted))

@@ -12,17 +12,17 @@ function storageKey(ceremonyId: string): string {
 
 export function useCeremonySecrets(ceremonyId: string) {
   const getSecrets = useCallback((): CeremonySecrets | null => {
-    const raw = localStorage.getItem(storageKey(ceremonyId))
+    const raw = sessionStorage.getItem(storageKey(ceremonyId))
     if (!raw) return null
     return JSON.parse(raw) as CeremonySecrets
   }, [ceremonyId])
 
   const saveSecrets = useCallback((secrets: CeremonySecrets) => {
-    localStorage.setItem(storageKey(ceremonyId), JSON.stringify(secrets))
+    sessionStorage.setItem(storageKey(ceremonyId), JSON.stringify(secrets))
   }, [ceremonyId])
 
   const clearSecrets = useCallback(() => {
-    localStorage.removeItem(storageKey(ceremonyId))
+    sessionStorage.removeItem(storageKey(ceremonyId))
   }, [ceremonyId])
 
   return { getSecrets, saveSecrets, clearSecrets }

@@ -169,6 +169,13 @@ instance ToJSON Commitment where
     , "committedAt"     .= committedAt c
     ]
 
+instance FromJSON Commitment where
+  parseJSON = withObject "Commitment" $ \o -> Commitment
+    <$> o .: "commitCeremony"
+    <*> o .: "commitParty"
+    <*> (o .: "entropySealHash" >>= mapM (parseHexField "entropySealHash"))
+    <*> o .: "committedAt"
+
 -- | A contribution of entropy to a ceremony
 data EntropyContribution = EntropyContribution
   { ecCeremony :: CeremonyId
@@ -182,6 +189,12 @@ instance ToJSON EntropyContribution where
     , "ecSource"   .= ecSource ec
     , "ecValue"    .= bsToText (ecValue ec)
     ]
+
+instance FromJSON EntropyContribution where
+  parseJSON = withObject "EntropyContribution" $ \o -> EntropyContribution
+    <$> o .: "ecCeremony"
+    <*> o .: "ecSource"
+    <*> (o .: "ecValue" >>= parseHexField "ecValue")
 
 -- | Where entropy came from
 data EntropySource
@@ -197,6 +210,16 @@ instance ToJSON EntropySource where
     DefaultEntropy pid     -> object ["tag" .= ("DefaultEntropy" :: Text), "participant" .= pid]
     BeaconEntropy anchor   -> object ["tag" .= ("BeaconEntropy" :: Text), "anchor" .= anchor]
     VRFEntropy vrf         -> object ["tag" .= ("VRFEntropy" :: Text), "vrf" .= vrf]
+
+instance FromJSON EntropySource where
+  parseJSON = withObject "EntropySource" $ \o -> do
+    tag <- o .: "tag" :: Parser Text
+    case tag of
+      "ParticipantEntropy" -> ParticipantEntropy <$> o .: "participant"
+      "DefaultEntropy"     -> DefaultEntropy <$> o .: "participant"
+      "BeaconEntropy"      -> BeaconEntropy <$> o .: "anchor"
+      "VRFEntropy"         -> VRFEntropy <$> o .: "vrf"
+      _                    -> fail ("Unknown EntropySource tag: " <> T.unpack tag)
 
 -- | Anchored external beacon value
 data BeaconAnchor = BeaconAnchor
@@ -258,6 +281,12 @@ instance ToJSON Outcome where
     , "outcomeProof"    .= outcomeProof o
     ]
 
+instance FromJSON Outcome where
+  parseJSON = withObject "Outcome" $ \o -> Outcome
+    <$> o .: "outcomeValue"
+    <*> (o .: "combinedEntropy" >>= parseHexField "combinedEntropy")
+    <*> o .: "outcomeProof"
+
 -- | The actual random result
 data CeremonyResult
   = CoinFlipResult Bool
@@ -280,6 +309,11 @@ instance ToJSON OutcomeProof where
     , "proofDerivation"    .= proofDerivation p
     ]
 
+instance FromJSON OutcomeProof where
+  parseJSON = withObject "OutcomeProof" $ \o -> OutcomeProof
+    <$> o .: "proofEntropyInputs"
+    <*> o .: "proofDerivation"
+
 -- | Events recorded in the audit log
 data CeremonyEvent
   = CeremonyCreated Ceremony
@@ -294,6 +328,7 @@ data CeremonyEvent
   | CeremonyExpired
   | CeremonyCancelled Text
   | CeremonyDisputed Text
+  | DeadlineExtended NominalDiffTime UTCTime
   deriving stock (Eq, Show, Generic)
 
 instance ToJSON CeremonyEvent where
@@ -310,9 +345,31 @@ instance ToJSON CeremonyEvent where
     CeremonyExpired           -> tagged "CeremonyExpired" []
     CeremonyCancelled reason  -> tagged "CeremonyCancelled" ["reason" .= reason]
     CeremonyDisputed reason   -> tagged "CeremonyDisputed" ["reason" .= reason]
+    DeadlineExtended dur newDl -> tagged "DeadlineExtended" ["duration" .= dur, "newDeadline" .= newDl]
     where
       tagged :: Text -> [Pair] -> Value
       tagged tag fields = object (("tag" .= tag) : fields)
+
+instance FromJSON CeremonyEvent where
+  parseJSON = withObject "CeremonyEvent" $ \o -> do
+    tag <- o .: "tag" :: Parser Text
+    case tag of
+      "CeremonyCreated"         -> CeremonyCreated <$> o .: "ceremony"
+      "ParticipantCommitted"    -> ParticipantCommitted <$> o .: "commitment"
+      "EntropyRevealed"         -> EntropyRevealed <$> o .: "participant"
+                                                   <*> (o .: "value" >>= parseHexField "value")
+      "RevealsPublished"        -> RevealsPublished <$> o .: "contributions"
+      "NonParticipationApplied" -> NonParticipationApplied <$> o .: "entry"
+      "BeaconAnchored"          -> BeaconAnchored <$> o .: "anchor"
+      "VRFGenerated"            -> VRFGenerated <$> o .: "vrf"
+      "CeremonyResolved"        -> CeremonyResolved <$> o .: "outcome"
+      "CeremonyFinalized"       -> pure CeremonyFinalized
+      "CeremonyExpired"         -> pure CeremonyExpired
+      "CeremonyCancelled"       -> CeremonyCancelled <$> o .: "reason"
+      "CeremonyDisputed"        -> CeremonyDisputed <$> o .: "reason"
+      "DeadlineExtended"        -> DeadlineExtended <$> o .: "duration"
+                                                    <*> o .: "newDeadline"
+      _                         -> fail ("Unknown CeremonyEvent tag: " <> T.unpack tag)
 
 -- | Record of non-participation and how it was handled
 data NonParticipationEntry = NonParticipationEntry
@@ -327,6 +384,12 @@ instance ToJSON NonParticipationEntry where
     , "npePolicyApplied"    .= npePolicyApplied e
     , "npeSubstitutedValue" .= fmap bsToText (npeSubstitutedValue e)
     ]
+
+instance FromJSON NonParticipationEntry where
+  parseJSON = withObject "NonParticipationEntry" $ \o -> NonParticipationEntry
+    <$> o .: "npeParticipant"
+    <*> o .: "npePolicyApplied"
+    <*> (o .: "npeSubstitutedValue" >>= mapM (parseHexField "npeSubstitutedValue"))
 
 -- | An entry in the per-ceremony audit log
 data LogEntry = LogEntry
