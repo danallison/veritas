@@ -47,13 +47,13 @@ import Data.Aeson
   )
 import Data.Aeson.Types (Pair, Parser)
 import Data.ByteString (ByteString)
-import qualified Data.ByteString as BS
 import Data.ByteArray.Encoding (Base(..), convertFromBase)
 import qualified Data.Text.Encoding as TE
 import qualified Data.OpenApi
 import Data.OpenApi (ToSchema(..))
 import Data.Text (Text)
 import qualified Data.Text as T
+import Veritas.Crypto.Hash (hexEncode)
 import Data.Time (UTCTime, NominalDiffTime)
 import Data.UUID (UUID)
 import Data.List.NonEmpty (NonEmpty)
@@ -165,7 +165,7 @@ instance ToJSON Commitment where
   toJSON c = object
     [ "commitCeremony"  .= commitCeremony c
     , "commitParty"     .= commitParty c
-    , "entropySealHash" .= fmap bsToText (entropySealHash c)
+    , "entropySealHash" .= fmap hexEncode (entropySealHash c)
     , "committedAt"     .= committedAt c
     ]
 
@@ -187,7 +187,7 @@ instance ToJSON EntropyContribution where
   toJSON ec = object
     [ "ecCeremony" .= ecCeremony ec
     , "ecSource"   .= ecSource ec
-    , "ecValue"    .= bsToText (ecValue ec)
+    , "ecValue"    .= hexEncode (ecValue ec)
     ]
 
 instance FromJSON EntropyContribution where
@@ -234,8 +234,8 @@ instance ToJSON BeaconAnchor where
   toJSON ba = object
     [ "baNetwork"   .= baNetwork ba
     , "baRound"     .= baRound ba
-    , "baValue"     .= bsToText (baValue ba)
-    , "baSignature" .= bsToText (baSignature ba)
+    , "baValue"     .= hexEncode (baValue ba)
+    , "baSignature" .= hexEncode (baSignature ba)
     , "baFetchedAt" .= baFetchedAt ba
     ]
 
@@ -256,9 +256,9 @@ data VRFOutput = VRFOutput
 
 instance ToJSON VRFOutput where
   toJSON v = object
-    [ "vrfValue"     .= bsToText (vrfValue v)
-    , "vrfProof"     .= bsToText (vrfProof v)
-    , "vrfPublicKey" .= bsToText (vrfPublicKey v)
+    [ "vrfValue"     .= hexEncode (vrfValue v)
+    , "vrfProof"     .= hexEncode (vrfProof v)
+    , "vrfPublicKey" .= hexEncode (vrfPublicKey v)
     ]
 
 instance FromJSON VRFOutput where
@@ -277,7 +277,7 @@ data Outcome = Outcome
 instance ToJSON Outcome where
   toJSON o = object
     [ "outcomeValue"    .= outcomeValue o
-    , "combinedEntropy" .= bsToText (combinedEntropy o)
+    , "combinedEntropy" .= hexEncode (combinedEntropy o)
     , "outcomeProof"    .= outcomeProof o
     ]
 
@@ -335,7 +335,7 @@ instance ToJSON CeremonyEvent where
   toJSON = \case
     CeremonyCreated c         -> tagged "CeremonyCreated" ["ceremony" .= c]
     ParticipantCommitted c    -> tagged "ParticipantCommitted" ["commitment" .= c]
-    EntropyRevealed pid val   -> tagged "EntropyRevealed" ["participant" .= pid, "value" .= bsToText val]
+    EntropyRevealed pid val   -> tagged "EntropyRevealed" ["participant" .= pid, "value" .= hexEncode val]
     RevealsPublished cs       -> tagged "RevealsPublished" ["contributions" .= cs]
     NonParticipationApplied e -> tagged "NonParticipationApplied" ["entry" .= e]
     BeaconAnchored a          -> tagged "BeaconAnchored" ["anchor" .= a]
@@ -382,7 +382,7 @@ instance ToJSON NonParticipationEntry where
   toJSON e = object
     [ "npeParticipant"      .= npeParticipant e
     , "npePolicyApplied"    .= npePolicyApplied e
-    , "npeSubstitutedValue" .= fmap bsToText (npeSubstitutedValue e)
+    , "npeSubstitutedValue" .= fmap hexEncode (npeSubstitutedValue e)
     ]
 
 instance FromJSON NonParticipationEntry where
@@ -427,14 +427,6 @@ instance ToSchema BeaconSpec where
 
 instance ToSchema BeaconFallback where
   declareNamedSchema _ = pure $ Data.OpenApi.NamedSchema (Just "BeaconFallback") mempty
-
--- | Helper: encode ByteString as hex text for JSON
-bsToText :: ByteString -> Text
-bsToText = T.pack . concatMap (\w -> [hexChar (w `div` 16), hexChar (w `mod` 16)]) . BS.unpack
-  where
-    hexChar n
-      | n < 10    = toEnum (fromIntegral n + fromEnum '0')
-      | otherwise = toEnum (fromIntegral n - 10 + fromEnum 'a')
 
 -- | Helper: decode hex-encoded text to ByteString, failing on invalid hex
 textToBS :: Text -> Either String ByteString

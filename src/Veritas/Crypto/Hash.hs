@@ -6,6 +6,7 @@ module Veritas.Crypto.Hash
   , deriveNth
   , bytesToInteger
   , genesisHash
+  , hexEncode
   ) where
 
 import Crypto.Hash (SHA256(..), hashWith)
@@ -14,6 +15,8 @@ import Data.ByteArray (convert)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as LBS
+import Data.Text (Text)
+import qualified Data.Text as T
 
 -- | Compute SHA-256 hash
 sha256 :: ByteString -> ByteString
@@ -53,3 +56,11 @@ bytesToInteger = BS.foldl' (\acc b -> acc * 256 + fromIntegral b) 0
 -- | The genesis hash (all zeros) used as prevHash for the first log entry
 genesisHash :: ByteString
 genesisHash = BS.replicate 32 0
+
+-- | Hex-encode a ByteString to Text (lowercase)
+hexEncode :: ByteString -> Text
+hexEncode = T.pack . concatMap (\w -> [hexChar (w `div` 16), hexChar (w `mod` 16)]) . BS.unpack
+  where
+    hexChar n
+      | n < 10    = toEnum (fromIntegral n + fromEnum '0')
+      | otherwise = toEnum (fromIntegral n - 10 + fromEnum 'a')

@@ -18,6 +18,10 @@ import qualified Properties.StatisticalProperties
 import qualified Veritas.API.HandlersSpec
 import qualified Veritas.DB.QueriesSpec
 import qualified Veritas.Workers.BeaconFetcherSpec
+import qualified Integration.LifecycleSpec
+import qualified Integration.ErrorSpec
+import qualified Integration.AuditLogSpec
+import qualified Integration.StandaloneSpec
 
 main :: IO ()
 main = hspec $ do
@@ -37,3 +41,7 @@ main = hspec $ do
   describe "API.Handlers" Veritas.API.HandlersSpec.spec
   describe "DB.Queries" Veritas.DB.QueriesSpec.spec
   describe "Workers.BeaconFetcher" Veritas.Workers.BeaconFetcherSpec.spec
+  describe "Integration.Lifecycle" Integration.LifecycleSpec.spec
+  describe "Integration.ErrorCases" Integration.ErrorSpec.spec
+  describe "Integration.AuditLog" Integration.AuditLogSpec.spec
+  describe "Integration.Standalone" Integration.StandaloneSpec.spec

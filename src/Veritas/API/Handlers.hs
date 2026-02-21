@@ -12,7 +12,6 @@ module Veritas.API.Handlers
 import Control.Monad (when)
 import Control.Monad.IO.Class (liftIO)
 import Data.ByteString (ByteString)
-import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BS8
 import qualified Data.ByteString.Lazy as LBS
 import Data.List (find)
@@ -35,7 +34,7 @@ import Veritas.Core.Entropy (verifySealForReveal)
 import qualified Crypto.Random
 import qualified Data.Aeson as Aeson
 import Veritas.Core.AuditLog (computeEntryHash)
-import Veritas.Crypto.Hash (genesisHash, deriveUniform)
+import Veritas.Crypto.Hash (genesisHash, deriveUniform, hexEncode)
 import Veritas.Crypto.VRF (generateVRF)
 import Veritas.Crypto.Signatures (KeyPair(..), publicKeyBytes)
 import Veritas.DB.Pool (DBPool, withConnection, withSerializableTransaction)
@@ -498,12 +497,4 @@ hexDecode t = case convertFromBase Base16 (TE.encodeUtf8 t) of
   Left _  -> Nothing
   Right bs -> Just bs
 
--- | Hex-encode a ByteString to Text
-hexEncode :: ByteString -> Text
-hexEncode = TE.decodeUtf8 . BS.concatMap (\w ->
-  let (hi, lo) = w `divMod` 16
-  in BS.pack [hexDigit hi, hexDigit lo])
-  where
-    hexDigit n
-      | n < 10    = n + 48  -- '0'
-      | otherwise = n + 87  -- 'a'
+

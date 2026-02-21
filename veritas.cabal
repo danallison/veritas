@@ -133,6 +133,13 @@ test-suite veritas-tests
     Veritas.API.HandlersSpec
     Veritas.DB.QueriesSpec
     Veritas.Workers.BeaconFetcherSpec
+    Integration.TestEnv
+    Integration.DbHelpers
+    Integration.CeremonyFixtures
+    Integration.LifecycleSpec
+    Integration.ErrorSpec
+    Integration.AuditLogSpec
+    Integration.StandaloneSpec
   ghc-options:
     -threaded
     -rtsopts

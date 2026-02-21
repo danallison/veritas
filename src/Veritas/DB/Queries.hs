@@ -74,7 +74,8 @@ import qualified Data.Aeson as Aeson
 import Data.ByteString (ByteString)
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Time (UTCTime, getCurrentTime)
+import Data.Time (UTCTime, getCurrentTime, utctDayTime)
+import Data.Time.Clock (picosecondsToDiffTime, diffTimeToPicoseconds)
 import Data.UUID (UUID)
 import Database.PostgreSQL.Simple
 import Database.PostgreSQL.Simple.FromRow
@@ -449,12 +450,21 @@ commitmentRowToDomain CommitmentRow{..} = Commitment
 
 appendAuditLog :: Connection -> CeremonyId -> CeremonyEvent -> IO ()
 appendAuditLog conn cid event = do
-  now <- getCurrentTime
+  now <- truncateToMicroseconds <$> getCurrentTime
   mlast <- getLastAuditLogEntry conn cid
   let prevHash = maybe genesisHash alrEntryHash mlast
       seqNum = maybe 0 (\e -> alrSequenceNum e + 1) mlast
       entry = createLogEntry (LogSequence (fromIntegral seqNum)) cid event now prevHash
   insertAuditLogEntry conn cid seqNum (eventTypeName event) (toJSON event) prevHash (logEntryHash entry) now
+
+-- | Truncate a UTCTime to microsecond precision to match PostgreSQL's TIMESTAMPTZ.
+-- Without this, the hash computed from the original picosecond-precision timestamp
+-- won't match when re-verified from the microsecond-precision DB timestamp.
+truncateToMicroseconds :: UTCTime -> UTCTime
+truncateToMicroseconds t =
+  let picos = diffTimeToPicoseconds (utctDayTime t)
+      truncated = (picos `div` 1000000) * 1000000
+  in t { utctDayTime = picosecondsToDiffTime truncated }
 
 eventTypeName :: CeremonyEvent -> Text
 eventTypeName = \case

@@ -47,6 +47,12 @@ transition ceremony commitments revealedParties action =
     -- === Pending phase ===
 
     (Pending, AddCommitment commit) -> do
+      -- Reject duplicate commits
+      let pid = commitParty commit
+      if any (\c -> commitParty c == pid) commitments
+        then Left (AlreadyCommitted pid)
+        else pure ()
+
       -- Validate entropy method requires seal
       case entropyMethod ceremony of
         ParticipantReveal
