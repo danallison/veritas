@@ -7,6 +7,7 @@ module Veritas.Config
   , defaultConfig
   ) where
 
+import Data.ByteArray.Encoding (Base(..), convertFromBase)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString.Char8 as BS8
 import Data.Text (Text)
@@ -30,8 +31,9 @@ data Config = Config
 
 -- | Configuration for the drand external randomness beacon
 data DrandConfig = DrandConfig
-  { drandRelayUrl  :: Text    -- ^ Base URL of the drand relay (e.g. "https://api.drand.sh")
-  , drandChainHash :: Text    -- ^ Default chain hash for the drand network
+  { drandRelayUrl  :: Text              -- ^ Base URL of the drand relay (e.g. "https://api.drand.sh")
+  , drandChainHash :: Text              -- ^ Default chain hash for the drand network
+  , drandPublicKey :: Maybe ByteString  -- ^ BLS public key (96 bytes). When Nothing, fetched from /info at startup.
   } deriving stock (Show, Generic)
 
 -- | Configuration for background worker polling intervals (in seconds)
@@ -52,6 +54,14 @@ loadConfig = do
   keyPath <- lookupEnv "VERITAS_SERVER_KEY"
   relayUrl <- maybe defaultDrandRelay T.pack <$> lookupEnv "VERITAS_DRAND_RELAY_URL"
   chainHash <- maybe defaultDrandChainHash T.pack <$> lookupEnv "VERITAS_DRAND_CHAIN_HASH"
+  pubKeyHex <- lookupEnv "VERITAS_DRAND_PUBLIC_KEY"
+  let drandPubKey = pubKeyHex >>= \hex ->
+        case convertFromBase Base16 (BS8.pack hex) of
+          Left _   -> Nothing
+          Right bs -> Just bs
+  case (pubKeyHex, drandPubKey) of
+    (Just _, Nothing) -> putStrLn "WARNING: VERITAS_DRAND_PUBLIC_KEY contains invalid hex, ignoring"
+    _                 -> pure ()
   rateLimit <- maybe 60 read <$> lookupEnv "VERITAS_RATE_LIMIT"
   rateWindow <- maybe 60 read <$> lookupEnv "VERITAS_RATE_WINDOW"
   tlsCert <- lookupEnv "VERITAS_TLS_CERT"
@@ -65,6 +75,7 @@ loadConfig = do
     , configDrand = DrandConfig
         { drandRelayUrl = relayUrl
         , drandChainHash = chainHash
+        , drandPublicKey = drandPubKey
         }
     , configRateLimit = rateLimit
     , configRateWindow = rateWindow
@@ -102,6 +113,7 @@ defaultConfig = Config
   , configDrand = DrandConfig
       { drandRelayUrl = defaultDrandRelay
       , drandChainHash = defaultDrandChainHash
+      , drandPublicKey = Nothing
       }
   , configRateLimit = 60
   , configRateWindow = 60

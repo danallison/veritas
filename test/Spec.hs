@@ -8,6 +8,7 @@ import qualified Veritas.Core.AuditLogSpec
 import qualified Veritas.Core.RevealSpec
 import qualified Veritas.Crypto.HashSpec
 import qualified Veritas.Crypto.CommitRevealSpec
+import qualified Veritas.Crypto.BLSSpec
 import qualified Veritas.External.DrandSpec
 import qualified Properties.StateMachineProperties
 import qualified Properties.ResolutionProperties
@@ -23,6 +24,7 @@ main = hspec $ do
   describe "Core.Reveal" Veritas.Core.RevealSpec.spec
   describe "Crypto.Hash" Veritas.Crypto.HashSpec.spec
   describe "Crypto.CommitReveal" Veritas.Crypto.CommitRevealSpec.spec
+  describe "Crypto.BLS" Veritas.Crypto.BLSSpec.spec
   describe "External.Drand" Veritas.External.DrandSpec.spec
   describe "Properties.StateMachine" Properties.StateMachineProperties.spec
   describe "Properties.Resolution" Properties.ResolutionProperties.spec

@@ -4,6 +4,7 @@ import HomePage from './pages/HomePage'
 import CreateCeremonyPage from './pages/CreateCeremonyPage'
 import CeremonyDetailPage from './pages/CeremonyDetailPage'
 import RandomToolsPage from './pages/RandomToolsPage'
+import VerifyBeaconPage from './pages/VerifyBeaconPage'
 import NotFoundPage from './pages/NotFoundPage'
 
 export default function App() {
@@ -14,6 +15,7 @@ export default function App() {
         <Route path="/create" element={<CreateCeremonyPage />} />
         <Route path="/ceremonies/:id" element={<CeremonyDetailPage />} />
         <Route path="/random" element={<RandomToolsPage />} />
+        <Route path="/verify" element={<VerifyBeaconPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Routes>

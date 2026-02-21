@@ -617,6 +617,34 @@ verifyEntryHash entry =
 
 Clients should be encouraged to periodically fetch and verify the chain, and the system should expose a `/verify` endpoint that performs full chain verification on demand.
 
+### Beacon Verification
+
+Ceremonies using the **ExternalBeacon** or **Combined** entropy method anchor their randomness to a drand distributed randomness beacon. The audit log's `BeaconAnchored` event exposes all raw cryptographic material needed for independent verification.
+
+**What clients receive** — the `BeaconAnchored` audit log event's `event_data` contains an `anchor` object with:
+- `baRound` — the drand round number
+- `baSignature` — hex-encoded 48-byte BLS G1 signature
+- `baValue` — hex-encoded 32-byte randomness value (= SHA-256 of the signature)
+- `baNetwork` — the drand chain hash
+- `baFetchedAt` — ISO 8601 timestamp of when the beacon was fetched
+
+**How to verify:**
+
+1. Fetch the ceremony's audit log (`GET /ceremonies/{id}/log`) and locate the `BeaconAnchored` event. The beacon data is in `event_data.anchor`.
+2. Verify that `baValue == SHA-256(baSignature)` — this confirms the randomness is derived from the signature.
+3. Construct the message: `message = SHA-256(big_endian_uint64(baRound))`.
+4. Obtain the drand public key — either from the Veritas server (`GET /verify/beacon`) or directly from the drand network (`GET https://api.drand.sh/{chain_hash}/info`).
+5. Verify the BLS12-381 signature (`baSignature`) over the message using the public key and DST `BLS_SIG_BLS12381G1_XMD:SHA-256_SSWU_RO_NUL_`.
+
+The scheme is `bls-unchained-g1-rfc9380` (drand quicknet): signatures on G1 (48 bytes compressed), public key on G2 (96 bytes compressed).
+
+**Reference implementations:**
+- **Go / JavaScript:** `drand/drand-client`
+- **Rust:** `drand/drand-verify`
+- **Haskell:** `Veritas.Crypto.BLS` (this project's `verifyDrandBeacon` function)
+
+**Trust model note:** For maximum assurance, clients should fetch the drand public key directly from the drand network rather than relying on the Veritas server's `/verify/beacon` endpoint. This eliminates the Veritas server from the trust chain entirely — the only trust assumption is in the drand distributed network itself.
+
 ### Key Management
 
 - **Server signing key (Ed25519):** Used to sign audit log entries and VRF outputs. Stored encrypted at rest. The public key is published and well-known.
@@ -649,6 +677,9 @@ type VeritasAPI =
   -- Server info
   :<|> "server" :> "pubkey" :> Get '[JSON] ServerPubKeyResponse
   :<|> "health" :> Get '[JSON] HealthResponse
+
+  -- Verification guides
+  :<|> "verify" :> "beacon" :> Get '[JSON] BeaconVerificationGuideResponse
 
 -- OpenAPI docs endpoint (separate from VeritasAPI)
 type FullAPI = VeritasAPI :<|> "docs" :> Get '[JSON] OpenApi
@@ -843,7 +874,7 @@ Beyond the roadmap, these ideas inform architectural decisions:
 
 - Participant commit-reveal entropy
 - drand beacon integration
-- **drand BLS signature verification** — verify beacon values against drand's public key before anchoring. Without this, the system trusts the drand relay to return authentic values. A compromised or spoofed relay could feed fake randomness. Requires a BLS12-381 library. **NOT YET IMPLEMENTED.**
+- **drand BLS signature verification** — beacon responses are verified against the drand network's BLS12-381 public key (using `hsblst`) before anchoring. The public key is fetched from the drand `/info` endpoint at startup, or can be overridden via `VERITAS_DRAND_PUBLIC_KEY`.
 - Combined entropy strategy
 - Log verification endpoint
 - Statistical test suite for output quality

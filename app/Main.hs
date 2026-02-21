@@ -11,7 +11,7 @@ import Servant (serve)
 import Veritas.API.Types (fullApi)
 import Veritas.API.Handlers (fullServer, AppEnv(..))
 import Veritas.API.RateLimit (newRateLimiter, RateLimitConfig(..))
-import Veritas.Config (loadConfig, Config(..), WorkerConfig(..))
+import Veritas.Config (loadConfig, Config(..), WorkerConfig(..), DrandConfig(..))
 import Veritas.Crypto.Signatures (loadOrGenerateKeyPair)
 import Veritas.DB.Pool (createPool, withConnection)
 import Veritas.DB.Migrations (runMigrations)
@@ -20,6 +20,7 @@ import Veritas.Workers.ExpiryChecker (runExpiryChecker)
 import Veritas.Workers.AutoResolver (runAutoResolver)
 import Veritas.Workers.RevealDeadlineChecker (runRevealDeadlineChecker)
 import Veritas.Workers.BeaconFetcher (runBeaconFetcher)
+import Veritas.External.Drand (fetchChainInfo, ChainInfo(..))
 
 import qualified Network.Wai.Handler.WarpTLS as TLS
 
@@ -42,10 +43,29 @@ main = bracket initLogEnv closeLogEnv $ \logEnv -> do
     Just path -> runKatipT logEnv $ logMsg "main" InfoS (ls ("Server key loaded/generated at " <> path))
     Nothing   -> runKatipT logEnv $ logMsg "main" InfoS "Using ephemeral server key pair"
 
+  -- Resolve drand public key: use configured key or fetch from /info
+  drandCfg <- case drandPublicKey (configDrand config) of
+    Just _pk -> do
+      runKatipT logEnv $ logMsg "main" InfoS "Using configured drand public key"
+      pure (configDrand config)
+    Nothing -> do
+      runKatipT logEnv $ logMsg "main" InfoS "Fetching drand chain info for BLS verification..."
+      chainResult <- fetchChainInfo (configDrand config) (drandChainHash (configDrand config))
+      case chainResult of
+        Right ci -> do
+          runKatipT logEnv $ logMsg "main" InfoS
+            (ls ("drand public key fetched (scheme: " <> show (ciSchemeID ci) <> ")"))
+          pure (configDrand config) { drandPublicKey = Just (ciPublicKey ci) }
+        Left err -> do
+          runKatipT logEnv $ logMsg "main" WarningS
+            (ls ("Failed to fetch drand chain info: " <> show err <> ". Beacon verification disabled."))
+          pure (configDrand config)
+
   let env = AppEnv
         { envPool = pool
         , envKeyPair = keyPair
         , envLogEnv = logEnv
+        , envDrandConfig = drandCfg
         }
 
   let workerCfg = configWorkers config
@@ -68,7 +88,7 @@ main = bracket initLogEnv closeLogEnv $ \logEnv -> do
   withAsync (runExpiryChecker logEnv pool (workerExpiryInterval workerCfg)) $ \_ ->
     withAsync (runAutoResolver logEnv pool keyPair (workerResolveInterval workerCfg)) $ \_ ->
       withAsync (runRevealDeadlineChecker logEnv pool (workerRevealInterval workerCfg)) $ \_ ->
-        withAsync (runBeaconFetcher logEnv pool (configDrand config) (workerBeaconInterval workerCfg)) $ \_ -> do
+        withAsync (runBeaconFetcher logEnv pool drandCfg (workerBeaconInterval workerCfg)) $ \_ -> do
           runKatipT logEnv $ logMsg "main" InfoS "Background workers started"
           case (configTLSCert config, configTLSKey config) of
             (Just certPath, Just keyPath) -> do

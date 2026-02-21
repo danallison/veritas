@@ -153,3 +153,12 @@ export interface RandomUUIDResponse {
 export interface ServerPubKeyResponse {
   public_key: string
 }
+
+export interface BeaconVerificationGuideResponse {
+  scheme: string
+  public_key: string | null
+  chain_hash: string
+  drand_info_url: string
+  dst: string
+  steps: string[]
+}

@@ -69,22 +69,26 @@ fetchAndAnchor logEnv pool drandCfg cid spec depth
         Right anchor -> anchorBeacon logEnv pool cid anchor
         Left err     -> handleFallback logEnv pool drandCfg cid spec depth err
 
--- | Resolve "default" network to the config's chain hash, otherwise use as-is
+-- | Resolve well-known network names to the config's chain hash, otherwise use as-is
 resolveChainHash :: DrandConfig -> Text -> Text
 resolveChainHash cfg network
-  | network == "default" = drandChainHash cfg
-  | otherwise            = network
+  | network == "default"        = drandChainHash cfg
+  | network == "drand-quicknet" = drandChainHash cfg
+  | otherwise                   = network
 
 -- | Apply the fallback strategy when beacon fetch fails
 handleFallback :: LogEnv -> DBPool -> DrandConfig -> CeremonyId -> BeaconSpec -> Int -> DrandError -> IO ()
-handleFallback logEnv pool drandCfg cid spec depth _err = case beaconFallback spec of
-  ExtendDeadline _ ->
-    -- Do nothing — the worker will retry on the next poll cycle
-    pure ()
-  AlternateSource altSpec ->
-    fetchAndAnchor logEnv pool drandCfg cid altSpec (depth + 1)
-  CancelCeremony ->
-    cancelCeremony logEnv pool cid "Beacon fetch failed and fallback is CancelCeremony"
+handleFallback logEnv pool drandCfg cid spec depth err = do
+  runKatipT logEnv $
+    logMsg "worker.beacon.fallback" WarningS (showLS err)
+  case beaconFallback spec of
+    ExtendDeadline _ ->
+      -- Do nothing — the worker will retry on the next poll cycle
+      pure ()
+    AlternateSource altSpec ->
+      fetchAndAnchor logEnv pool drandCfg cid altSpec (depth + 1)
+    CancelCeremony ->
+      cancelCeremony logEnv pool cid "Beacon fetch failed and fallback is CancelCeremony"
 
 -- | Anchor a beacon value: insert it and run the state machine transition
 anchorBeacon :: LogEnv -> DBPool -> CeremonyId -> BeaconAnchor -> IO ()

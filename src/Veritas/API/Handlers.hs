@@ -39,12 +39,14 @@ import Data.OpenApi (OpenApi)
 import Katip (LogEnv, logMsg, Severity(..), runKatipT, ls)
 import Servant.OpenApi (toOpenApi)
 import Veritas.API.Types
+import Veritas.Config (DrandConfig(..))
 
 -- | Application environment passed to all handlers
 data AppEnv = AppEnv
-  { envPool      :: DBPool
-  , envKeyPair   :: KeyPair
-  , envLogEnv    :: LogEnv
+  { envPool        :: DBPool
+  , envKeyPair     :: KeyPair
+  , envLogEnv      :: LogEnv
+  , envDrandConfig :: DrandConfig
   }
 
 -- | Wire up all handlers to the API type
@@ -63,6 +65,7 @@ server env =
   :<|> randomUUID
   :<|> serverPubKey env
   :<|> healthCheck
+  :<|> beaconVerificationGuide env
 
 -- | Wire up all handlers including docs endpoint
 fullServer :: AppEnv -> Server FullAPI
@@ -362,6 +365,29 @@ healthCheck = pure HealthResponse
   { hrStatus = "ok"
   , hrVersion = "0.1.0"
   }
+
+-- === Verification Guides ===
+
+beaconVerificationGuide :: AppEnv -> Handler BeaconVerificationGuideResponse
+beaconVerificationGuide AppEnv{..} = do
+  let cfg = envDrandConfig
+      infoUrl = drandRelayUrl cfg <> "/" <> drandChainHash cfg <> "/info"
+      pubKeyHex = fmap hexEncode (drandPublicKey cfg)
+  pure BeaconVerificationGuideResponse
+    { bvgScheme      = "bls-unchained-g1-rfc9380"
+    , bvgPublicKey   = pubKeyHex
+    , bvgChainHash   = drandChainHash cfg
+    , bvgDrandInfoUrl = infoUrl
+    , bvgDST         = "BLS_SIG_BLS12381G1_XMD:SHA-256_SSWU_RO_NUL_"
+    , bvgSteps       =
+        [ "1. Fetch the ceremony audit log (GET /ceremonies/{id}/log) and locate the BeaconAnchored event."
+        , "2. Extract the beacon data from event_data.anchor: baRound, baSignature (hex), and baValue (hex randomness)."
+        , "3. Verify that baValue == SHA-256(baSignature) to confirm the randomness is derived from the signature."
+        , "4. Construct the message: message = SHA-256(big_endian_uint64(baRound))."
+        , "5. Obtain the drand public key from this endpoint's public_key field, or directly from the drand network (drand_info_url)."
+        , "6. Verify the BLS12-381 signature (baSignature) over the message using the public key and DST."
+        ]
+    }
 
 -- === Helpers ===
 

@@ -12,6 +12,7 @@ import type {
   RandomIntResponse,
   RandomUUIDResponse,
   HealthResponse,
+  BeaconVerificationGuideResponse,
 } from './types'
 
 const BASE = import.meta.env.VITE_API_BASE ?? '/api'
@@ -72,6 +73,9 @@ const api = {
 
   health: () =>
     get<HealthResponse>('/health'),
+
+  getBeaconVerificationGuide: () =>
+    get<BeaconVerificationGuideResponse>('/verify/beacon'),
 }
 
 export { api, ApiError }

@@ -55,6 +55,7 @@ common common-deps
     , lens              >= 5.0
     , insert-ordered-containers >= 0.2
     , wai-cors            >= 0.2
+    , hsblst              >= 0.0.4
 
 library
   import:           common-deps
@@ -69,6 +70,7 @@ library
     Veritas.Crypto.Signatures
     Veritas.Crypto.CommitReveal
     Veritas.Crypto.VRF
+    Veritas.Crypto.BLS
     Veritas.API.Types
     Veritas.API.Handlers
     Veritas.DB.Pool
@@ -112,6 +114,7 @@ test-suite veritas-tests
     Veritas.Core.RevealSpec
     Veritas.Crypto.HashSpec
     Veritas.Crypto.CommitRevealSpec
+    Veritas.Crypto.BLSSpec
     Veritas.External.DrandSpec
     Properties.StateMachineProperties
     Properties.ResolutionProperties

@@ -24,6 +24,7 @@ module Veritas.API.Types
   , RandomIntResponse(..)
   , RandomUUIDResponse(..)
   , ServerPubKeyResponse(..)
+  , BeaconVerificationGuideResponse(..)
   ) where
 
 import Data.Aeson (FromJSON(..), ToJSON(..), Value, withObject, (.:), (.:?), object, (.=))
@@ -62,6 +63,9 @@ type VeritasAPI =
        -- Server info
   :<|> "server" :> "pubkey" :> Get '[JSON] ServerPubKeyResponse
   :<|> "health" :> Get '[JSON] HealthResponse
+
+       -- Verification guides
+  :<|> "verify" :> "beacon" :> Get '[JSON] BeaconVerificationGuideResponse
 
 api :: Proxy VeritasAPI
 api = Proxy
@@ -378,6 +382,34 @@ instance FromJSON ServerPubKeyResponse where
   parseJSON = withObject "ServerPubKeyResponse" $ \o -> ServerPubKeyResponse
     <$> o .: "public_key"
 
+data BeaconVerificationGuideResponse = BeaconVerificationGuideResponse
+  { bvgScheme      :: Text
+  , bvgPublicKey   :: Maybe Text
+  , bvgChainHash   :: Text
+  , bvgDrandInfoUrl :: Text
+  , bvgDST         :: Text
+  , bvgSteps       :: [Text]
+  } deriving stock (Eq, Show, Generic)
+
+instance ToJSON BeaconVerificationGuideResponse where
+  toJSON r = object
+    [ "scheme"         .= bvgScheme r
+    , "public_key"     .= bvgPublicKey r
+    , "chain_hash"     .= bvgChainHash r
+    , "drand_info_url" .= bvgDrandInfoUrl r
+    , "dst"            .= bvgDST r
+    , "steps"          .= bvgSteps r
+    ]
+
+instance FromJSON BeaconVerificationGuideResponse where
+  parseJSON = withObject "BeaconVerificationGuideResponse" $ \o -> BeaconVerificationGuideResponse
+    <$> o .: "scheme"
+    <*> o .:? "public_key"
+    <*> o .: "chain_hash"
+    <*> o .: "drand_info_url"
+    <*> o .: "dst"
+    <*> o .: "steps"
+
 -- === OpenAPI helpers ===
 
 -- | Build a properties map from a list of (name, schema) pairs
@@ -531,4 +563,17 @@ instance ToSchema ServerPubKeyResponse where
     & OA.type_ ?~ OA.OpenApiObject
     & OA.properties .~ props
       [ ("public_key", mempty & OA.type_ ?~ OA.OpenApiString & OA.description ?~ "Hex-encoded Ed25519 public key")
+      ]
+
+instance ToSchema BeaconVerificationGuideResponse where
+  declareNamedSchema _ = pure $ OA.NamedSchema (Just "BeaconVerificationGuideResponse") $ mempty
+    & OA.type_ ?~ OA.OpenApiObject
+    & OA.description ?~ "Guide for independently verifying drand beacon signatures used in Veritas ceremonies"
+    & OA.properties .~ props
+      [ ("scheme", mempty & OA.type_ ?~ OA.OpenApiString & OA.description ?~ "BLS signature scheme identifier (e.g. bls-unchained-g1-rfc9380)")
+      , ("public_key", mempty & OA.type_ ?~ OA.OpenApiString & OA.description ?~ "Hex-encoded 96-byte BLS G2 public key used by the drand network, or null if unavailable")
+      , ("chain_hash", mempty & OA.type_ ?~ OA.OpenApiString & OA.description ?~ "The drand chain hash identifying the network")
+      , ("drand_info_url", mempty & OA.type_ ?~ OA.OpenApiString & OA.description ?~ "URL to fetch drand chain info (including the public key) directly")
+      , ("dst", mempty & OA.type_ ?~ OA.OpenApiString & OA.description ?~ "Domain Separation Tag for BLS signature verification")
+      , ("steps", mempty & OA.type_ ?~ OA.OpenApiArray & OA.description ?~ "Ordered list of human-readable verification steps")
       ]

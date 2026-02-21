@@ -21,7 +21,7 @@ export default function CreateCeremonyPage() {
   const [deadlineMinutes, setDeadlineMinutes] = useState(60)
   const [revealMinutes, setRevealMinutes] = useState(30)
   const [nonPartPolicy, setNonPartPolicy] = useState<NonParticipationPolicy>('Exclusion')
-  const [beaconNetwork, setBeaconNetwork] = useState('drand-quicknet')
+  const [beaconNetwork, setBeaconNetwork] = useState('default')
 
   const needsRevealParams = method === 'ParticipantReveal' || method === 'Combined'
   const needsBeacon = method === 'ExternalBeacon' || method === 'Combined'
