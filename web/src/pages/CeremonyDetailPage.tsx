@@ -2,12 +2,29 @@ import { useParams } from 'react-router-dom'
 import { useCeremony } from '../hooks/useCeremony'
 import PhaseIndicator from '../components/PhaseIndicator'
 import CopyLinkButton from '../components/CopyLinkButton'
+import JoinForm from '../components/JoinForm'
+import RosterAckForm from '../components/RosterAckForm'
 import CommitForm from '../components/CommitForm'
 import RevealForm from '../components/RevealForm'
 import OutcomeDisplay from '../components/OutcomeDisplay'
 import AuditLog from '../components/AuditLog'
 import VerificationData from '../components/VerificationData'
-import type { EntropyMethod } from '../api/types'
+import type { EntropyMethod, CeremonyType } from '../api/types'
+
+function formatCeremonyType(ct: CeremonyType): string {
+  switch (ct.tag) {
+    case 'CoinFlip':
+      return `Coin Flip: "${ct.contents[0]}" vs "${ct.contents[1]}"`
+    case 'UniformChoice':
+      return `Uniform Choice: ${ct.contents.join(', ')}`
+    case 'Shuffle':
+      return `Shuffle: ${ct.contents.join(', ')}`
+    case 'IntRange':
+      return `Integer Range: ${ct.contents[0]} to ${ct.contents[1]}`
+    case 'WeightedChoice':
+      return `Weighted Choice: ${ct.contents.map(([label, weight]) => `${label} (${weight})`).join(', ')}`
+  }
+}
 
 const METHOD_LABELS: Record<EntropyMethod, string> = {
   OfficiantVRF: 'Server generated',
@@ -24,7 +41,7 @@ export default function CeremonyDetailPage() {
   if (error) return <p className="text-red-600">{error}</p>
   if (!ceremony || !id) return <p className="text-red-600">Ceremony not found</p>
 
-  const typeLabel = ceremony.ceremony_type.tag
+  const typeDescription = formatCeremonyType(ceremony.ceremony_type)
 
   return (
     <div className="space-y-6">
@@ -32,21 +49,29 @@ export default function CeremonyDetailPage() {
         <div>
           <h1 className="text-2xl font-bold">{ceremony.question}</h1>
           <p className="text-sm text-gray-500 mt-1">
-            {typeLabel} &middot; {METHOD_LABELS[ceremony.entropy_method]} &middot;{' '}
+            {typeDescription} &middot; {METHOD_LABELS[ceremony.entropy_method]} &middot;{' '}
             {ceremony.commitment_count}/{ceremony.required_parties} committed
           </p>
         </div>
         <CopyLinkButton ceremonyId={id} />
       </div>
 
-      <PhaseIndicator phase={ceremony.phase} />
+      <PhaseIndicator phase={ceremony.phase} identityMode={ceremony.identity_mode} />
 
       <div className="bg-white border border-gray-200 rounded-lg p-4">
         <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
           <Dt>ID</Dt>
           <Dd><code className="text-xs break-all">{ceremony.id}</code></Dd>
+          <Dt>Outcome Type</Dt>
+          <Dd>{typeDescription}</Dd>
           <Dt>Commitment Mode</Dt>
           <Dd>{ceremony.commitment_mode}</Dd>
+          {ceremony.identity_mode === 'SelfCertified' && (
+            <>
+              <Dt>Identity</Dt>
+              <Dd>Self-Certified</Dd>
+            </>
+          )}
           <Dt>Commit Deadline</Dt>
           <Dd>{new Date(ceremony.commit_deadline).toLocaleString()}</Dd>
           {ceremony.reveal_deadline && (
@@ -80,10 +105,25 @@ export default function CeremonyDetailPage() {
       )}
 
       {/* Phase-appropriate action */}
+      {ceremony.phase === 'Gathering' && ceremony.identity_mode === 'SelfCertified' && (
+        <JoinForm ceremonyId={id} onJoined={refetch} />
+      )}
+
+      {ceremony.phase === 'AwaitingRosterAcks' && ceremony.roster && (
+        <RosterAckForm
+          ceremonyId={id}
+          roster={ceremony.roster}
+          ceremony={ceremony}
+          onAcknowledged={refetch}
+        />
+      )}
+
       {ceremony.phase === 'Pending' && (
         <CommitForm
           ceremonyId={id}
           entropyMethod={ceremony.entropy_method}
+          identityMode={ceremony.identity_mode}
+          ceremony={ceremony}
           onCommitted={refetch}
         />
       )}
@@ -109,6 +149,7 @@ export default function CeremonyDetailPage() {
           ceremonyId={id}
           entropyMethod={ceremony.entropy_method}
           ceremonyType={ceremony.ceremony_type}
+          identityMode={ceremony.identity_mode}
         />
       )}
 

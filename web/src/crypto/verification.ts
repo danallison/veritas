@@ -99,9 +99,10 @@ export async function combineEntropy(inputs: EntropyInput[]): Promise<string> {
 
 // --- Outcome derivation ---
 
-export async function deriveCoinFlip(entropyHex: string): Promise<boolean> {
+export async function deriveCoinFlip(entropyHex: string, labels: [string, string]): Promise<string> {
   const n = await deriveUniformN(hexToBytes(entropyHex))
-  return n * 2n >= TWO_TO_256 // equivalent to n/2^256 >= 0.5
+  const isTrue = n * 2n >= TWO_TO_256 // equivalent to n/2^256 >= 0.5
+  return isTrue ? labels[0] : labels[1]
 }
 
 export async function deriveChoice(entropyHex: string, choices: string[]): Promise<string> {
@@ -195,7 +196,10 @@ export async function verifyOutcome(
   let computedOutcome: unknown
   switch (ceremonyType.tag) {
     case 'CoinFlip':
-      computedOutcome = await deriveCoinFlip(computedCombinedEntropy)
+      computedOutcome = await deriveCoinFlip(
+        computedCombinedEntropy,
+        ceremonyType.contents as [string, string],
+      )
       break
     case 'UniformChoice':
       computedOutcome = await deriveChoice(

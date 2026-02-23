@@ -12,6 +12,7 @@ module Veritas.API.Handlers
 import Control.Monad (when)
 import Control.Monad.IO.Class (liftIO)
 import Data.ByteString (ByteString)
+import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BS8
 import qualified Data.ByteString.Lazy as LBS
 import Data.List (find)
@@ -28,9 +29,11 @@ import GHC.Natural (Natural)
 import Servant
 
 import Veritas.Core.Types
-import Veritas.Core.StateMachine (Action(..), TransitionResult(..), transition)
+import Veritas.Core.StateMachine (Action(..), TransitionResult(..), transition, transitionWith)
 import Veritas.Core.Resolution (resolve, deriveIntRange)
 import Veritas.Core.Entropy (verifySealForReveal)
+import Veritas.Crypto.CeremonyParams (computeParamsHash, paramsHashHex)
+import Veritas.Crypto.Roster (verifyRosterSignature, verifyCommitSignature)
 import qualified Crypto.Random
 import qualified Data.Aeson as Aeson
 import Veritas.Core.AuditLog (computeEntryHash)
@@ -64,6 +67,9 @@ server env =
   :<|> getOutcomeH env
   :<|> getAuditLogH env
   :<|> verifyCeremony env
+  :<|> joinCeremony env
+  :<|> ackRoster env
+  :<|> getRosterH env
   :<|> randomCoin
   :<|> randomInteger
   :<|> randomUUID
@@ -109,7 +115,11 @@ createCeremony AppEnv{..} req = do
   creator <- case crqCreatedBy req of
     Just pid -> pure pid
     Nothing  -> liftIO UUID4.nextRandom
-  let ceremony = Ceremony
+  let imode = maybe Anonymous id (crqIdentityMode req)
+      initialPhase = case imode of
+        SelfCertified -> Gathering
+        Anonymous     -> Pending
+      ceremony = Ceremony
         { ceremonyId = CeremonyId cid
         , question = crqQuestion req
         , ceremonyType = crqCeremonyType req
@@ -120,7 +130,8 @@ createCeremony AppEnv{..} req = do
         , revealDeadline = crqRevealDeadline req
         , nonParticipationPolicy = crqNonParticipationPolicy req
         , beaconSpec = crqBeaconSpec req
-        , phase = Pending
+        , identityMode = imode
+        , phase = initialPhase
         , createdBy = ParticipantId creator
         , createdAt = now
         }
@@ -130,7 +141,7 @@ createCeremony AppEnv{..} req = do
       Q.appendAuditLog conn (CeremonyId cid) (CeremonyCreated ceremony)
     runKatipT envLogEnv $
       logMsg "api.ceremony" InfoS (ls ("Ceremony created: " <> UUID.toText cid))
-  pure $ ceremonyToResponse ceremony 0 []
+  pure $ ceremonyToResponse ceremony 0 [] Nothing
 
 -- | Reject DefaultSubstitution for 2-party ceremonies.
 -- With only 2 parties, if one doesn't reveal, the remaining party knows both
@@ -199,11 +210,16 @@ getCeremonyH AppEnv{..} cid = do
   case mrow of
     Nothing -> throwError err404
     Just row -> do
-      (count, participants) <- liftIO $ withConnection envPool $ \conn -> do
+      (count, participants, mRoster) <- liftIO $ withConnection envPool $ \conn -> do
         c <- Q.getCommitmentCount conn (CeremonyId cid)
         ps <- Q.getCommittedParticipants conn (CeremonyId cid)
-        pure (c, ps)
-      pure $ ceremonyRowToResponse row count participants
+        roster <- if Q.crIdentityMode row == "self_certified"
+          then do
+            prows <- Q.getCeremonyParticipants conn (CeremonyId cid)
+            pure $ Just (map participantRowToRosterEntry prows)
+          else pure Nothing
+        pure (c, ps, roster)
+      pure $ ceremonyRowToResponse row count participants mRoster
 
 listCeremoniesH :: AppEnv -> Maybe Text -> Handler [CeremonyResponse]
 listCeremoniesH AppEnv{..} phaseFilter = do
@@ -218,7 +234,7 @@ listCeremoniesH AppEnv{..} phaseFilter = do
       let uid = Q.crId row
           count = Map.findWithDefault 0 uid countMap
           participants = Map.findWithDefault [] uid partMap
-      in ceremonyRowToResponse row count participants
+      in ceremonyRowToResponse row count participants Nothing
       ) rows
 
 commitToCeremony :: AppEnv -> UUID -> CommitRequest -> Handler CommitResponse
@@ -232,41 +248,35 @@ commitToCeremony AppEnv{..} cid req = do
         Just row -> do
           let ceremony = Q.ceremonyRowToDomain row
               pid = ParticipantId (cmrqParticipantId req)
-          commitments <- map Q.commitmentRowToDomain <$> Q.getCommitments conn' (CeremonyId cid)
+          -- Validate entropy_seal hex upfront: reject invalid hex rather than silently treating as absent
+          let sealResult = case cmrqEntropySeal req of
+                Nothing      -> Right Nothing
+                Just sealHex -> case hexDecode sealHex of
+                  Nothing -> Left $ err400 { errBody = "invalid hex in entropy_seal" }
+                  Just bs -> Right (Just bs)
+          case sealResult of
+            Left e -> pure (Left e)
+            Right sealBytes -> do
+              commitments <- map Q.commitmentRowToDomain <$> Q.getCommitments conn' (CeremonyId cid)
 
-          let commit = Commitment
-                { commitCeremony = CeremonyId cid
-                , commitParty = pid
-                , entropySealHash = cmrqEntropySeal req >>= hexDecode
-                , committedAt = now
-                }
-
-          case transition ceremony commitments [] (AddCommitment commit) of
-            Left err -> pure (Left $ err400 { errBody = LBS.fromStrict (BS8.pack (show err)) })
-            Right TransitionResult{..} -> do
-              Q.insertCommitment conn' commit (cmrqDisplayName req)
-              Q.updateCeremonyPhase conn' (CeremonyId cid) trNewPhase
-              Q.appendAuditLog conn' (CeremonyId cid) (ParticipantCommitted commit)
-
-              -- For Method C (VRF), if we've entered Resolving, generate VRF and resolve
-              when (trNewPhase == Resolving && entropyMethod ceremony == OfficiantVRF) $ do
-                let vrfOut = generateVRF envKeyPair (CeremonyId cid)
-                    contribution = EntropyContribution
-                      { ecCeremony = CeremonyId cid
-                      , ecSource = VRFEntropy vrfOut
-                      , ecValue = vrfValue vrfOut
-                      }
-                    outcome = resolve (ceremonyType ceremony) [contribution]
-                Q.appendAuditLog conn' (CeremonyId cid) (VRFGenerated vrfOut)
-                Q.insertOutcome conn' (CeremonyId cid) outcome
-                Q.updateCeremonyPhase conn' (CeremonyId cid) Finalized
-                Q.appendAuditLog conn' (CeremonyId cid) (CeremonyResolved outcome)
-                Q.appendAuditLog conn' (CeremonyId cid) CeremonyFinalized
-
-              pure (Right $ CommitResponse
-                { cmrStatus = "committed"
-                , cmrPhase = trNewPhase
-                })
+              -- For self-certified ceremonies, verify the commit signature
+              case identityMode ceremony of
+                SelfCertified -> do
+                  case cmrqSignature req of
+                    Nothing -> pure (Left $ err400 { errBody = "signature is required for self-certified ceremonies" })
+                    Just sigHex -> case hexDecode sigHex of
+                      Nothing -> pure (Left $ err400 { errBody = "invalid hex in signature" })
+                      Just sig -> do
+                        mpk <- Q.getParticipantPublicKey conn' (CeremonyId cid) pid
+                        case mpk of
+                          Nothing -> pure (Left $ err400 { errBody = LBS.fromStrict (BS8.pack (show (NotJoined pid))) })
+                          Just pk -> do
+                            let paramsHash = computeParamsHash ceremony
+                            if not (verifyCommitSignature pk sig (CeremonyId cid) pid paramsHash sealBytes)
+                              then pure (Left $ err400 { errBody = "invalid commit signature" })
+                              else doCommit conn' ceremony commitments pid sealBytes now
+                Anonymous ->
+                  doCommit conn' ceremony commitments pid sealBytes now
 
   case result of
     Left err -> throwError err
@@ -274,6 +284,41 @@ commitToCeremony AppEnv{..} cid req = do
       liftIO $ runKatipT envLogEnv $
         logMsg "api.commit" InfoS (ls ("Commitment received for ceremony " <> show cid))
       pure resp
+  where
+    doCommit conn' ceremony commitments pid sealBytes now = do
+      let commit = Commitment
+            { commitCeremony = CeremonyId cid
+            , commitParty = pid
+            , entropySealHash = sealBytes
+            , committedAt = now
+            }
+
+      case transition ceremony commitments [] (AddCommitment commit) of
+        Left err -> pure (Left $ err400 { errBody = LBS.fromStrict (BS8.pack (show err)) })
+        Right TransitionResult{..} -> do
+          Q.insertCommitment conn' commit (cmrqDisplayName req)
+          Q.updateCeremonyPhase conn' (CeremonyId cid) trNewPhase
+          Q.appendAuditLog conn' (CeremonyId cid) (ParticipantCommitted commit)
+
+          -- For Method C (VRF), if we've entered Resolving, generate VRF and resolve
+          when (trNewPhase == Resolving && entropyMethod ceremony == OfficiantVRF) $ do
+            let vrfOut = generateVRF envKeyPair (CeremonyId cid)
+                contribution = EntropyContribution
+                  { ecCeremony = CeremonyId cid
+                  , ecSource = VRFEntropy vrfOut
+                  , ecValue = vrfValue vrfOut
+                  }
+                outcome = resolve (ceremonyType ceremony) [contribution]
+            Q.appendAuditLog conn' (CeremonyId cid) (VRFGenerated vrfOut)
+            Q.insertOutcome conn' (CeremonyId cid) outcome
+            Q.updateCeremonyPhase conn' (CeremonyId cid) Finalized
+            Q.appendAuditLog conn' (CeremonyId cid) (CeremonyResolved outcome)
+            Q.appendAuditLog conn' (CeremonyId cid) CeremonyFinalized
+
+          pure (Right $ CommitResponse
+            { cmrStatus = "committed"
+            , cmrPhase = trNewPhase
+            })
 
 revealEntropy :: AppEnv -> UUID -> RevealRequest -> Handler RevealResponse
 revealEntropy AppEnv{..} cid req = do
@@ -416,10 +461,138 @@ beaconVerificationGuide AppEnv{..} = do
         ]
     }
 
+-- === Self-Certified Identity ===
+
+joinCeremony :: AppEnv -> UUID -> JoinRequest -> Handler JoinResponse
+joinCeremony AppEnv{..} cid req = do
+  now <- liftIO getCurrentTime
+  result <- liftIO $ withConnection envPool $ \conn ->
+    withSerializableTransaction conn $ \conn' -> do
+      mrow <- Q.getCeremony conn' (CeremonyId cid)
+      case mrow of
+        Nothing -> pure (Left err404)
+        Just row -> do
+          let ceremony = Q.ceremonyRowToDomain row
+              pid = ParticipantId (jrqParticipantId req)
+
+          -- Must be self-certified
+          case identityMode ceremony of
+            Anonymous -> pure (Left $ err400 { errBody = "ceremony is not self-certified" })
+            SelfCertified -> do
+              -- Validate public key
+              case hexDecode (jrqPublicKey req) of
+                Nothing -> pure (Left $ err400 { errBody = "invalid hex in public_key" })
+                Just pkBytes
+                  | BS.length pkBytes /= 32 ->
+                      pure (Left $ err400 { errBody = "public_key must be 32 bytes (Ed25519)" })
+                  | otherwise -> do
+                      -- Get existing roster
+                      prows <- Q.getCeremonyParticipants conn' (CeremonyId cid)
+                      let roster = Q.participantRowsToRoster prows
+                          reg = ParticipantRegistration
+                            { prCeremony = CeremonyId cid
+                            , prParticipant = pid
+                            , prPublicKey = pkBytes
+                            , prDisplayName = jrqDisplayName req
+                            , prJoinedAt = now
+                            }
+                          ackCount = length [() | p <- prows, Q.cprRosterSig p /= Nothing]
+
+                      case transitionWith roster ackCount ceremony [] [] (RegisterParticipant reg) of
+                        Left err -> pure (Left $ err400 { errBody = LBS.fromStrict (BS8.pack (show err)) })
+                        Right TransitionResult{..} -> do
+                          Q.insertCeremonyParticipant conn' (CeremonyId cid) pid pkBytes (jrqDisplayName req) now
+                          Q.updateCeremonyPhase conn' (CeremonyId cid) trNewPhase
+                          mapM_ (Q.appendAuditLog conn' (CeremonyId cid)) trEvents
+                          pure (Right $ JoinResponse
+                            { jrStatus = "joined"
+                            , jrPhase = trNewPhase
+                            })
+
+  case result of
+    Left err -> throwError err
+    Right resp -> do
+      liftIO $ runKatipT envLogEnv $
+        logMsg "api.join" InfoS (ls ("Participant joined ceremony " <> show cid))
+      pure resp
+
+ackRoster :: AppEnv -> UUID -> AckRosterRequest -> Handler AckRosterResponse
+ackRoster AppEnv{..} cid req = do
+  now <- liftIO getCurrentTime
+  result <- liftIO $ withConnection envPool $ \conn ->
+    withSerializableTransaction conn $ \conn' -> do
+      mrow <- Q.getCeremony conn' (CeremonyId cid)
+      case mrow of
+        Nothing -> pure (Left err404)
+        Just row -> do
+          let ceremony = Q.ceremonyRowToDomain row
+              pid = ParticipantId (arrqParticipantId req)
+
+          case hexDecode (arrqSignature req) of
+            Nothing -> pure (Left $ err400 { errBody = "invalid hex in signature" })
+            Just sig -> do
+              -- Get roster
+              prows <- Q.getCeremonyParticipants conn' (CeremonyId cid)
+              let roster = Q.participantRowsToRoster prows
+
+              -- Check if already acked
+              case find (\p -> Q.cprParticipantId p == arrqParticipantId req) prows of
+                Nothing -> pure (Left $ err400 { errBody = LBS.fromStrict (BS8.pack (show (NotJoined pid))) })
+                Just prow
+                  | Q.cprRosterSig prow /= Nothing ->
+                      pure (Left $ err400 { errBody = LBS.fromStrict (BS8.pack (show (AlreadyAcknowledged pid))) })
+                  | otherwise -> do
+                      -- Verify signature
+                      let paramsHash = computeParamsHash ceremony
+                      if not (verifyRosterSignature (CeremonyId cid) paramsHash roster pid sig)
+                        then pure (Left $ err400 { errBody = "invalid roster signature" })
+                        else do
+                          let ackCount = length [() | p <- prows, Q.cprRosterSig p /= Nothing]
+
+                          case transitionWith roster ackCount ceremony [] [] (AcknowledgeRoster pid sig) of
+                            Left err -> pure (Left $ err400 { errBody = LBS.fromStrict (BS8.pack (show err)) })
+                            Right TransitionResult{..} -> do
+                              Q.updateRosterAck conn' (CeremonyId cid) pid sig now
+                              Q.updateCeremonyPhase conn' (CeremonyId cid) trNewPhase
+                              mapM_ (Q.appendAuditLog conn' (CeremonyId cid)) trEvents
+                              pure (Right $ AckRosterResponse
+                                { arrStatus = "acknowledged"
+                                , arrPhase = trNewPhase
+                                })
+
+  case result of
+    Left err -> throwError err
+    Right resp -> do
+      liftIO $ runKatipT envLogEnv $
+        logMsg "api.ack-roster" InfoS (ls ("Roster ack for ceremony " <> show cid))
+      pure resp
+
+getRosterH :: AppEnv -> UUID -> Handler RosterResponse
+getRosterH AppEnv{..} cid = do
+  mrow <- liftIO $ withConnection envPool $ \conn -> Q.getCeremony conn (CeremonyId cid)
+  case mrow of
+    Nothing -> throwError err404
+    Just row -> do
+      prows <- liftIO $ withConnection envPool $ \conn ->
+        Q.getCeremonyParticipants conn (CeremonyId cid)
+      let locked = Q.crPhase row /= "gathering"
+      pure RosterResponse
+        { rrParticipants = map participantRowToRosterEntry prows
+        , rrLocked = locked
+        }
+
+participantRowToRosterEntry :: Q.CeremonyParticipantRow -> RosterEntryResponse
+participantRowToRosterEntry Q.CeremonyParticipantRow{..} = RosterEntryResponse
+  { reParticipantId = cprParticipantId
+  , rePublicKey = hexEncode cprPublicKey
+  , reDisplayName = cprDisplayName
+  , reAcknowledged = cprRosterSig /= Nothing
+  }
+
 -- === Helpers ===
 
-ceremonyToResponse :: Ceremony -> Int -> [Q.CommittedParticipant] -> CeremonyResponse
-ceremonyToResponse c count participants = CeremonyResponse
+ceremonyToResponse :: Ceremony -> Int -> [Q.CommittedParticipant] -> Maybe [RosterEntryResponse] -> CeremonyResponse
+ceremonyToResponse c count participants mRoster = CeremonyResponse
   { crspId = unCeremonyId (ceremonyId c)
   , crspQuestion = question c
   , crspCeremonyType = ceremonyType c
@@ -430,16 +603,19 @@ ceremonyToResponse c count participants = CeremonyResponse
   , crspRevealDeadline = revealDeadline c
   , crspNonParticipationPolicy = nonParticipationPolicy c
   , crspBeaconSpec = beaconSpec c
+  , crspIdentityMode = identityMode c
   , crspPhase = phase c
   , crspCreatedBy = unParticipantId (createdBy c)
   , crspCreatedAt = createdAt c
   , crspCommitmentCount = count
   , crspCommittedParticipants = map toParticipantResponse participants
+  , crspRoster = mRoster
+  , crspParamsHash = paramsHashHex c
   }
 
-ceremonyRowToResponse :: Q.CeremonyRow -> Int -> [Q.CommittedParticipant] -> CeremonyResponse
-ceremonyRowToResponse row count participants =
-  ceremonyToResponse (Q.ceremonyRowToDomain row) count participants
+ceremonyRowToResponse :: Q.CeremonyRow -> Int -> [Q.CommittedParticipant] -> Maybe [RosterEntryResponse] -> CeremonyResponse
+ceremonyRowToResponse row count participants mRoster =
+  ceremonyToResponse (Q.ceremonyRowToDomain row) count participants mRoster
 
 toParticipantResponse :: Q.CommittedParticipant -> CommittedParticipantResponse
 toParticipantResponse Q.CommittedParticipant{..} = CommittedParticipantResponse

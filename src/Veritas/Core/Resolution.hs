@@ -59,7 +59,7 @@ sourceKey ec = case ecSource ec of
 -- | Derive the appropriate result type from entropy
 deriveResult :: CeremonyType -> ByteString -> CeremonyResult
 deriveResult ctype entropy = case ctype of
-  CoinFlip              -> CoinFlipResult (deriveCoinFlip entropy)
+  CoinFlip labelA labelB -> CoinFlipResult (if deriveCoinFlip entropy then labelA else labelB)
   UniformChoice choices -> ChoiceResult (deriveChoice entropy choices)
   Shuffle items         -> ShuffleResult (deriveShuffle entropy items)
   IntRange lo hi        -> IntRangeResult (deriveIntRange entropy lo hi)

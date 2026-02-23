@@ -6,11 +6,15 @@ module Veritas.Core.StateMachine
   ( Action(..)
   , TransitionResult(..)
   , transition
+  , transitionWith
   , canCommit
+  , canCommitSelfCertified
   , isTerminal
+  , postCommitPhase
   ) where
 
 import Data.ByteString (ByteString)
+import Data.List (sort)
 import Data.Text (Text)
 import Data.Time (UTCTime)
 
@@ -27,6 +31,8 @@ data Action
   | Finalize
   | CheckDeadline UTCTime  -- ^ current time for deadline checks
   | Dispute Text
+  | RegisterParticipant ParticipantRegistration
+  | AcknowledgeRoster ParticipantId ByteString  -- ^ pid, signature
   deriving stock (Show)
 
 -- | Result of a state transition
@@ -41,8 +47,93 @@ transition :: Ceremony           -- ^ current ceremony state
            -> [ParticipantId]    -- ^ participants who have revealed
            -> Action             -- ^ action to apply
            -> Either TransitionError TransitionResult
-transition ceremony commitments revealedParties action =
+transition = transitionWith [] 0
+
+-- | Extended transition that also accepts self-certified identity state.
+transitionWith :: Roster          -- ^ registered participants (sorted)
+               -> Int             -- ^ number of roster acknowledgments received
+               -> Ceremony        -- ^ current ceremony state
+               -> [Commitment]    -- ^ existing commitments
+               -> [ParticipantId] -- ^ participants who have revealed
+               -> Action          -- ^ action to apply
+               -> Either TransitionError TransitionResult
+transitionWith roster ackCount ceremony commitments revealedParties action =
   case (phase ceremony, action) of
+
+    -- === Gathering phase (self-certified only) ===
+
+    (Gathering, RegisterParticipant reg) -> do
+      let pid = prParticipant reg
+      if any (\(p, _) -> p == pid) roster
+        then Left (AlreadyJoined pid)
+        else do
+          let newRoster = sort ((pid, prPublicKey reg) : roster)
+              newCount = length newRoster
+              quorum = fromIntegral (requiredParties ceremony)
+              joinEvent = ParticipantJoined pid (prPublicKey reg)
+          case commitmentMode ceremony of
+            Immediate
+              | newCount >= quorum ->
+                  pure TransitionResult
+                    { trNewPhase = AwaitingRosterAcks
+                    , trEvents = [joinEvent, RosterFinalized newRoster]
+                    }
+            _ ->
+              pure TransitionResult
+                { trNewPhase = Gathering
+                , trEvents = [joinEvent]
+                }
+
+    (Gathering, CheckDeadline now)
+      | now >= commitDeadline ceremony -> do
+          let count = length roster
+              quorum = fromIntegral (requiredParties ceremony)
+          if count >= quorum
+            then do
+              let sortedRoster = sort roster
+              pure TransitionResult
+                { trNewPhase = AwaitingRosterAcks
+                , trEvents = [RosterFinalized sortedRoster]
+                }
+            else
+              pure TransitionResult
+                { trNewPhase = Expired
+                , trEvents = [CeremonyExpired]
+                }
+      | otherwise ->
+          Left (DeadlineNotPassed (commitDeadline ceremony) now)
+
+    -- === AwaitingRosterAcks phase ===
+
+    (AwaitingRosterAcks, AcknowledgeRoster pid sig) -> do
+      if not (any (\(p, _) -> p == pid) roster)
+        then Left (NotJoined pid)
+        else do
+          -- The caller (handler) is responsible for verifying the signature
+          -- and tracking which participants have already acked
+          let newAckCount = ackCount + 1
+              allAcked = newAckCount >= length roster
+              event = RosterAcknowledged pid sig
+          if allAcked
+            then
+              pure TransitionResult
+                { trNewPhase = Pending
+                , trEvents = [event]
+                }
+            else
+              pure TransitionResult
+                { trNewPhase = AwaitingRosterAcks
+                , trEvents = [event]
+                }
+
+    (AwaitingRosterAcks, CheckDeadline now)
+      | now >= commitDeadline ceremony ->
+          pure TransitionResult
+            { trNewPhase = Expired
+            , trEvents = [CeremonyExpired]
+            }
+      | otherwise ->
+          Left (DeadlineNotPassed (commitDeadline ceremony) now)
 
     -- === Pending phase ===
 
@@ -224,15 +315,25 @@ isTerminal = \case
   Disputed  -> True
   _         -> False
 
+-- | Check if a participant can still commit to a self-certified ceremony
+canCommitSelfCertified :: Ceremony -> [Commitment] -> Roster -> ParticipantId -> UTCTime -> Either TransitionError ()
+canCommitSelfCertified ceremony commitments roster pid now = do
+  canCommit ceremony commitments pid now
+  if not (any (\(p, _) -> p == pid) roster)
+    then Left (NotJoined pid)
+    else Right ()
+
 -- | Best-effort guess at what phase an action is targeting (for error messages)
 actionTargetPhase :: Action -> Phase
 actionTargetPhase = \case
-  AddCommitment{}        -> Pending
-  SubmitReveal{}         -> AwaitingReveals
+  AddCommitment{}         -> Pending
+  SubmitReveal{}          -> AwaitingReveals
   ApplyNonParticipation{} -> AwaitingReveals
-  AnchorBeacon{}         -> AwaitingBeacon
-  GenerateVRF{}          -> Resolving
-  ResolveOutcome{}       -> Resolving
-  Finalize               -> Finalized
-  CheckDeadline{}        -> Pending
-  Dispute{}              -> Disputed
+  AnchorBeacon{}          -> AwaitingBeacon
+  GenerateVRF{}           -> Resolving
+  ResolveOutcome{}        -> Resolving
+  Finalize                -> Finalized
+  CheckDeadline{}         -> Pending
+  Dispute{}               -> Disputed
+  RegisterParticipant{}   -> Gathering
+  AcknowledgeRoster{}     -> AwaitingRosterAcks

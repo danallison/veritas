@@ -16,7 +16,7 @@ instance Arbitrary ByteString where
 
 instance Arbitrary Phase where
   arbitrary = elements
-    [Pending, AwaitingReveals, AwaitingBeacon, Resolving, Finalized, Expired, Cancelled, Disputed]
+    [Gathering, AwaitingRosterAcks, Pending, AwaitingReveals, AwaitingBeacon, Resolving, Finalized, Expired, Cancelled, Disputed]
 
 instance Arbitrary EntropyMethod where
   arbitrary = elements [ParticipantReveal, ExternalBeacon, OfficiantVRF, Combined]

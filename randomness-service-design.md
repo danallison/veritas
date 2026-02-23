@@ -188,7 +188,7 @@ data Phase
   | Disputed         -- Verification failed
 
 data CeremonyType
-  = CoinFlip
+  = CoinFlip Text Text          -- sideA, sideB labels (e.g. "Heads" "Tails")
   | UniformChoice (NonEmpty Text)
   | Shuffle (NonEmpty Text)
   | IntRange Int Int
@@ -255,7 +255,7 @@ data Outcome = Outcome
   }
 
 data CeremonyResult
-  = CoinFlipResult Bool
+  = CoinFlipResult Text          -- the winning label
   | ChoiceResult Text
   | ShuffleResult [Text]
   | IntRangeResult Int
@@ -537,9 +537,9 @@ deriveUniform entropy =
 
 -- Apply to ceremony type
 resolveOutcome :: CeremonyType -> ByteString -> Value
-resolveOutcome CoinFlip entropy =
+resolveOutcome (CoinFlip labelA labelB) entropy =
   let r = deriveUniform entropy
-  in toJSON $ if r < 1 % 2 then "heads" else "tails"
+  in toJSON $ if r >= 1 % 2 then labelA else labelB
 
 resolveOutcome (UniformChoice options) entropy =
   let r = deriveUniform entropy
@@ -694,7 +694,7 @@ The commit and reveal endpoints handle both the participation commitment and the
 POST /ceremonies
 {
   "question": "Who picks the restaurant tonight",
-  "ceremony_type": { "tag": "CoinFlip" },
+  "ceremony_type": { "tag": "CoinFlip", "contents": ["Heads", "Tails"] },
   "entropy_method": "Combined",
   "required_parties": 2,
   "commitment_mode": "Immediate",
@@ -900,38 +900,40 @@ Beyond the roadmap, these ideas inform architectural decisions:
 
 ### Phase 5: Participant Identity & Non-Repudiation
 
-The current system identifies participants by ephemeral UUIDs — sufficient for low-stakes ceremonies where everyone trusts each other, but inadequate when a participant might deny their commitment after an unfavorable outcome. This phase adds two identity strategies that cover different trust models.
+> **Status: Self-certified identity is implemented.** OAuth identity remains planned for a future phase.
 
-**OAuth identity (human participants, low friction)**
+The anonymous identity model (ephemeral UUIDs) is sufficient for low-stakes ceremonies where everyone trusts each other, but inadequate when a participant might deny their commitment after an unfavorable outcome. This phase adds identity strategies that cover different trust models.
 
-- OAuth 2.0 integration (Google, GitHub) for linking commitments to real-world accounts
-- Commitments display the authenticated identity (e.g. "alice@example.com committed")
-- Optional per-ceremony policy: require authenticated participants, or allow anonymous
-- Identity provider is trusted — appropriate for social/casual use cases
-
-**Self-contained ceremony identity (agents and advanced users)**
+**Self-contained ceremony identity — IMPLEMENTED**
 
 A zero-infrastructure identity protocol where the ceremony record itself constitutes complete cryptographic proof of participation. No external identity provider, certificate authority, or pre-existing key exchange required.
 
-Protocol:
+Protocol (as implemented):
 
-1. **Join** — Each participant registers a public key with the ceremony. No commitments yet.
-2. **Roster acknowledgment** — Once all required parties have joined, each participant signs the full participant roster ("I see that this ceremony has participants with keys [X, Y, Z], and I'm proceeding"). This proves mutual awareness.
-3. **Commitment** — Each participant signs their commitment with the same key. The audit log records the signature and sequence.
-4. **Resolution + finalization** — Outcome is determined, everything sealed into the hash chain.
+1. **Join** (`POST /ceremonies/{id}/join`) — Each participant registers an Ed25519 public key with the ceremony. Phase: `Gathering`. The ceremony advances to `AwaitingRosterAcks` when quorum is met (Immediate mode) or when the commit deadline passes with sufficient registrations (DeadlineWait mode).
+2. **Roster acknowledgment** (`POST /ceremonies/{id}/ack-roster`) — Each participant signs the canonical roster payload: `"veritas-roster-v2:" || ceremony_id_bytes || params_hash (32 bytes) || pid_1_bytes || pk_1_bytes || pid_2_bytes || pk_2_bytes || ...` (sorted by participant_id). The `params_hash` is a SHA-256 hash of all ceremony parameters, binding the participant to the specific ceremony configuration. Phase: `AwaitingRosterAcks`. The ceremony advances to `Pending` when all participants have acknowledged.
+3. **Commitment** (`POST /ceremonies/{id}/commit` with `signature` field) — Each participant signs their commitment: `"veritas-commit-v2:" || ceremony_id || participant_id || params_hash (32 bytes) || seal_hash?`. The signature is verified against their registered public key. Phase: `Pending`.
+4. **Resolution + finalization** — Outcome is determined as usual, everything sealed into the hash chain.
 
 Non-repudiation argument: denying involvement requires claiming private key compromise, because the record contains (a) the participant's public key registered before commitments, (b) a roster signature proving they saw who else was participating, and (c) a signed commitment binding them to the outcome — all in a tamper-evident hash chain.
 
 This is particularly suited to AI agent coordination where agents handle cryptography natively and may not have out-of-band channels for key exchange. The ceremony becomes a self-bootstrapping trust context.
 
-Implementation:
+Implementation details:
 
-- Persistent keypair generation and storage (per-agent or per-session, configurable)
-- Roster data structure: ordered list of (participant_id, public_key) tuples
-- Roster signing endpoint: POST `/ceremonies/{id}/acknowledge-roster`
-- Signed commitments: commitment payload includes Ed25519 signature over (ceremony_id, participant_pubkey, commitment_data)
-- Verification: any party can verify all signatures in the ceremony record independently
-- API identity mode field on ceremony creation: `anonymous` | `oauth` | `self-certified`
+- Backend: `Veritas.Crypto.Roster` handles roster payload serialization and Ed25519 signature verification
+- Frontend: `web/src/crypto/identity.ts` handles Ed25519 keypair generation (via `@noble/ed25519`), roster/commit signing, and localStorage persistence
+- Database: `ceremony_participants` table stores public keys, roster signatures, and acknowledgment timestamps
+- State machine: `transitionWith` accepts the roster and ack count as additional parameters; `transition` delegates with empty defaults for backward compatibility
+- API: `identity_mode` field on ceremony creation (`anonymous` | `self_certified`); new endpoints for join, ack-roster, and roster retrieval
+- Verification guide: includes steps for verifying roster and commit signatures
+
+**OAuth identity (human participants, low friction) — PLANNED**
+
+- OAuth 2.0 integration (Google, GitHub) for linking commitments to real-world accounts
+- Commitments display the authenticated identity (e.g. "alice@example.com committed")
+- Optional per-ceremony policy: require authenticated participants, or allow anonymous
+- Identity provider is trusted — appropriate for social/casual use cases
 
 ### Phase 6: Educational UX
 

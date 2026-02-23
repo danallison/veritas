@@ -46,9 +46,13 @@ A **ceremony** is the unit of social randomness — a lifecycle from creation th
 
 ### Ceremony Phases
 
-`Pending` → `AwaitingReveals` → `AwaitingBeacon` → `Resolving` → `Finalized` (also `Expired`, `Cancelled`, `Disputed`)
+Anonymous ceremonies: `Pending` → `AwaitingReveals` → `AwaitingBeacon` → `Resolving` → `Finalized`
 
-State transitions are pure functions returning either a `TransitionError` or the new phase plus log events.
+Self-certified ceremonies: `Gathering` → `AwaitingRosterAcks` → `Pending` → (same as above)
+
+Terminal phases: `Expired`, `Cancelled`, `Disputed`
+
+State transitions are pure functions returning either a `TransitionError` or the new phase plus log events. Self-certified ceremonies use `transitionWith` which takes the roster and ack count as additional parameters.
 
 ### Entropy Strategies
 
@@ -61,13 +65,13 @@ Four strategies, configurable per ceremony:
 ### Key Modules
 
 - `src/Veritas/Core/` — Ceremony state machine, types, commitment logic, entropy, audit log
-- `src/Veritas/Crypto/` — Hash utilities, Ed25519 signatures, commit-reveal, VRF
+- `src/Veritas/Crypto/` — Hash utilities, Ed25519 signatures, commit-reveal, VRF, roster signing
 - `src/Veritas/API/` — Servant API type definition, handlers, auth, rate limiting
 - `src/Veritas/DB/` — PostgreSQL queries, connection pool, migrations
 - `src/Veritas/External/` — drand beacon client
 - `src/Veritas/Workers/` — Background workers (expiry, auto-resolver, beacon fetcher, reveal deadline)
 - `src/Veritas/Logging.hs` — Katip structured logging
-- `web/src/` — React frontend (pages, components, API client, hooks)
+- `web/src/` — React frontend (pages, components, API client, hooks, Ed25519 client crypto)
 - `test/Properties/` — QuickCheck property tests (entropy uniformity, state machine validity, deterministic outcomes)
 
 ### Audit Log
@@ -76,11 +80,12 @@ Every ceremony state transition is recorded in an append-only, hash-chained log.
 
 ### Participant Identity
 
-Currently participants are identified by ephemeral UUIDs with optional display names. The roadmap includes two identity strategies:
-- **OAuth** — for human participants, ties commitments to real-world accounts
-- **Self-contained ceremony identity** — cryptographic protocol where the ceremony record itself proves participation (roster acknowledgment + signed commitments). Designed for AI agent coordination.
+Ceremonies support two identity modes, chosen at creation:
 
-See Phase 5 in `randomness-service-design.md` for the full protocol.
+- **Anonymous** (default) — Participants are identified by ephemeral UUIDs. Ceremonies start in `Pending`. Appropriate for low-stakes scenarios with mutual trust.
+- **SelfCertified** — Each participant registers an Ed25519 public key, signs a roster acknowledgment, and signs their commitment. Ceremonies start in `Gathering` and progress through `AwaitingRosterAcks` before reaching `Pending`. The ceremony record itself constitutes complete cryptographic proof of participation — denying involvement requires claiming private key compromise. Designed for AI agent coordination and high-stakes scenarios.
+
+Key modules: `Veritas.Crypto.Roster` (backend signing/verification), `web/src/crypto/identity.ts` (frontend Ed25519 keypair management and signing). See `ceremony-protocol.md` Section 10 for the full protocol specification.
 
 ## Critical Invariants
 
@@ -88,3 +93,4 @@ See Phase 5 in `randomness-service-design.md` for the full protocol.
 - **Outcome derivation is deterministic.** Same entropy must always produce the same outcome (pure functions, deterministic ordering by ParticipantId).
 - **Audit log entries are hash-chained.** `entry_hash = SHA-256(sequence || ceremony_id || event || timestamp || prev_hash)`.
 - **Commitments are cryptographically binding.** `commitment_hash = SHA-256(ceremony_id || participant_id || nonce)`.
+- **Self-certified identity is non-repudiable.** The audit log contains the participant's public key, their roster signature, and their signed commitment — three layers of cryptographic evidence recorded in the tamper-evident hash chain.

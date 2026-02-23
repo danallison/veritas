@@ -49,7 +49,7 @@ const resolvedEntry = {
   event_data: {
     tag: 'CeremonyResolved',
     outcome: {
-      outcomeValue: { tag: 'CoinFlipResult', contents: true },
+      outcomeValue: { tag: 'CoinFlipResult', contents: 'Heads' },
       combinedEntropy: 'deadbeef01234567',
       outcomeProof: {
         proofEntropyInputs: [
@@ -90,7 +90,7 @@ describe('VerificationData', () => {
         <VerificationData
           ceremonyId="c1"
           entropyMethod="Combined"
-          ceremonyType={{ tag: 'CoinFlip' }}
+          ceremonyType={{ tag: 'CoinFlip', contents: ['Heads', 'Tails'] }}
         />,
       ),
     )
@@ -115,7 +115,7 @@ describe('VerificationData', () => {
         <VerificationData
           ceremonyId="c1"
           entropyMethod="Combined"
-          ceremonyType={{ tag: 'CoinFlip' }}
+          ceremonyType={{ tag: 'CoinFlip', contents: ['Heads', 'Tails'] }}
         />,
       ),
     )
@@ -131,7 +131,7 @@ describe('VerificationData', () => {
         <VerificationData
           ceremonyId="c1"
           entropyMethod="Combined"
-          ceremonyType={{ tag: 'CoinFlip' }}
+          ceremonyType={{ tag: 'CoinFlip', contents: ['Heads', 'Tails'] }}
         />,
       ),
     )
@@ -152,7 +152,7 @@ describe('VerificationData', () => {
         <VerificationData
           ceremonyId="c1"
           entropyMethod="ParticipantReveal"
-          ceremonyType={{ tag: 'CoinFlip' }}
+          ceremonyType={{ tag: 'CoinFlip', contents: ['Heads', 'Tails'] }}
         />,
       ),
     )
@@ -172,7 +172,7 @@ describe('VerificationData', () => {
         <VerificationData
           ceremonyId="c1"
           entropyMethod="Combined"
-          ceremonyType={{ tag: 'CoinFlip' }}
+          ceremonyType={{ tag: 'CoinFlip', contents: ['Heads', 'Tails'] }}
         />,
       ),
     )
@@ -190,12 +190,12 @@ describe('VerificationData', () => {
         <VerificationData
           ceremonyId="c1"
           entropyMethod="Combined"
-          ceremonyType={{ tag: 'CoinFlip' }}
+          ceremonyType={{ tag: 'CoinFlip', contents: ['Heads', 'Tails'] }}
         />,
       ),
     )
     await waitFor(() => expect(screen.getByText('deadbeef01234567')).toBeDefined())
-    expect(screen.getByText('Heads (true)')).toBeDefined()
+    expect(screen.getByText('Heads')).toBeDefined()
   })
 
   it('builds correct curl command with chain hash and round', async () => {
@@ -207,7 +207,7 @@ describe('VerificationData', () => {
         <VerificationData
           ceremonyId="c1"
           entropyMethod="Combined"
-          ceremonyType={{ tag: 'CoinFlip' }}
+          ceremonyType={{ tag: 'CoinFlip', contents: ['Heads', 'Tails'] }}
         />,
       ),
     )
@@ -224,7 +224,7 @@ describe('VerificationData', () => {
         <VerificationData
           ceremonyId="c1"
           entropyMethod="Combined"
-          ceremonyType={{ tag: 'CoinFlip' }}
+          ceremonyType={{ tag: 'CoinFlip', contents: ['Heads', 'Tails'] }}
         />,
       ),
     )
@@ -240,7 +240,7 @@ describe('VerificationData', () => {
         <VerificationData
           ceremonyId="c1"
           entropyMethod="Combined"
-          ceremonyType={{ tag: 'CoinFlip' }}
+          ceremonyType={{ tag: 'CoinFlip', contents: ['Heads', 'Tails'] }}
         />,
       ),
     )

@@ -49,6 +49,17 @@ module Veritas.DB.Queries
     -- * Reveal Helpers
   , revealsToContributions
 
+    -- * Ceremony Participants (self-certified)
+  , insertCeremonyParticipant
+  , getCeremonyParticipants
+  , getCeremonyParticipantCount
+  , getCeremonyParticipantByPid
+  , updateRosterAck
+  , getRosterAckCount
+  , getParticipantPublicKey
+  , participantRowsToRoster
+  , CeremonyParticipantRow(..)
+
     -- * Domain Conversions
   , ceremonyRowToDomain
   , commitmentRowToDomain
@@ -56,10 +67,12 @@ module Veritas.DB.Queries
   , parseEntropyMethod
   , parseCommitmentMode
   , parseNonParticipationPolicy
+  , parseIdentityMode
   , showPhase
   , showEntropyMethod
   , showCommitmentMode
   , showNonParticipationPolicy
+  , showIdentityMode
 
     -- * Row types
   , CeremonyRow(..)
@@ -82,6 +95,8 @@ import Database.PostgreSQL.Simple.FromRow
 
 import Veritas.Core.Types
 import Veritas.Core.AuditLog (createLogEntry)
+import Data.List (sortBy)
+import Data.Ord (comparing)
 import Veritas.Crypto.Hash (genesisHash)
 
 -- === Ceremonies ===
@@ -91,8 +106,8 @@ insertCeremony conn Ceremony{..} = do
   _ <- execute conn
     "INSERT INTO ceremonies (id, question, ceremony_type, entropy_method, \
     \required_parties, commitment_mode, commit_deadline, reveal_deadline, \
-    \non_participation_policy, beacon_spec, phase, created_by, created_at) \
-    \VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    \non_participation_policy, beacon_spec, identity_mode, phase, created_by, created_at) \
+    \VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
     ( ( unCeremonyId ceremonyId
       , question
       , toJSON ceremonyType
@@ -103,6 +118,7 @@ insertCeremony conn Ceremony{..} = do
       ) :. ( revealDeadline
            , fmap showNonParticipationPolicy nonParticipationPolicy
            , fmap toJSON beaconSpec
+           , showIdentityMode identityMode
            , showPhase phase
            , unParticipantId createdBy
            , createdAt
@@ -115,7 +131,7 @@ getCeremony conn (CeremonyId cid) =
   safeHead <$> query conn
     "SELECT id, question, ceremony_type, entropy_method, required_parties, \
     \commitment_mode, commit_deadline, reveal_deadline, non_participation_policy, \
-    \beacon_spec, phase, created_by, created_at \
+    \beacon_spec, identity_mode, phase, created_by, created_at \
     \FROM ceremonies WHERE id = ?"
     (Only cid)
 
@@ -124,13 +140,13 @@ listCeremonies conn Nothing =
   query_ conn
     "SELECT id, question, ceremony_type, entropy_method, required_parties, \
     \commitment_mode, commit_deadline, reveal_deadline, non_participation_policy, \
-    \beacon_spec, phase, created_by, created_at \
+    \beacon_spec, identity_mode, phase, created_by, created_at \
     \FROM ceremonies ORDER BY created_at DESC"
 listCeremonies conn (Just phaseFilter) =
   query conn
     "SELECT id, question, ceremony_type, entropy_method, required_parties, \
     \commitment_mode, commit_deadline, reveal_deadline, non_participation_policy, \
-    \beacon_spec, phase, created_by, created_at \
+    \beacon_spec, identity_mode, phase, created_by, created_at \
     \FROM ceremonies WHERE phase = ? ORDER BY created_at DESC"
     (Only phaseFilter)
 
@@ -303,7 +319,7 @@ getLastAuditLogEntry conn (CeremonyId cid) =
 getPendingExpiredCeremonies :: Connection -> UTCTime -> IO [UUID]
 getPendingExpiredCeremonies conn now =
   map fromOnly <$> query conn
-    "SELECT id FROM ceremonies WHERE phase = 'pending' AND commit_deadline < ?"
+    "SELECT id FROM ceremonies WHERE phase IN ('pending', 'gathering', 'awaiting_roster_acks') AND commit_deadline < ?"
     (Only now)
 
 getResolvingCeremonies :: Connection -> IO [UUID]
@@ -332,6 +348,80 @@ getAwaitingRevealsCeremonies conn now =
     \WHERE phase = 'awaiting_reveals' AND reveal_deadline < ?"
     (Only now)
 
+-- === Ceremony Participants (self-certified) ===
+
+data CeremonyParticipantRow = CeremonyParticipantRow
+  { cprCeremonyId    :: UUID
+  , cprParticipantId :: UUID
+  , cprPublicKey     :: ByteString
+  , cprDisplayName   :: Maybe Text
+  , cprJoinedAt      :: UTCTime
+  , cprRosterSig     :: Maybe ByteString
+  , cprAckedAt       :: Maybe UTCTime
+  } deriving stock (Show)
+
+instance FromRow CeremonyParticipantRow where
+  fromRow = CeremonyParticipantRow <$> field <*> field <*> field <*> field <*> field <*> field <*> field
+
+insertCeremonyParticipant :: Connection -> CeremonyId -> ParticipantId -> ByteString -> Maybe Text -> UTCTime -> IO ()
+insertCeremonyParticipant conn (CeremonyId cid) (ParticipantId pid) pk displayName joinedAt = do
+  _ <- execute conn
+    "INSERT INTO ceremony_participants (ceremony_id, participant_id, public_key, display_name, joined_at) \
+    \VALUES (?, ?, ?, ?, ?)"
+    (cid, pid, Binary pk, displayName, joinedAt)
+  pure ()
+
+getCeremonyParticipants :: Connection -> CeremonyId -> IO [CeremonyParticipantRow]
+getCeremonyParticipants conn (CeremonyId cid) =
+  query conn
+    "SELECT ceremony_id, participant_id, public_key, display_name, joined_at, roster_signature, acked_at \
+    \FROM ceremony_participants WHERE ceremony_id = ? ORDER BY participant_id"
+    (Only cid)
+
+getCeremonyParticipantCount :: Connection -> CeremonyId -> IO Int
+getCeremonyParticipantCount conn (CeremonyId cid) = do
+  [Only n] <- query conn
+    "SELECT COUNT(*) FROM ceremony_participants WHERE ceremony_id = ?"
+    (Only cid)
+  pure n
+
+getCeremonyParticipantByPid :: Connection -> CeremonyId -> ParticipantId -> IO (Maybe CeremonyParticipantRow)
+getCeremonyParticipantByPid conn (CeremonyId cid) (ParticipantId pid) =
+  safeHead <$> query conn
+    "SELECT ceremony_id, participant_id, public_key, display_name, joined_at, roster_signature, acked_at \
+    \FROM ceremony_participants WHERE ceremony_id = ? AND participant_id = ?"
+    (cid, pid)
+
+updateRosterAck :: Connection -> CeremonyId -> ParticipantId -> ByteString -> UTCTime -> IO ()
+updateRosterAck conn (CeremonyId cid) (ParticipantId pid) sig ackedAt = do
+  _ <- execute conn
+    "UPDATE ceremony_participants SET roster_signature = ?, acked_at = ? \
+    \WHERE ceremony_id = ? AND participant_id = ?"
+    (Binary sig, ackedAt, cid, pid)
+  pure ()
+
+getRosterAckCount :: Connection -> CeremonyId -> IO Int
+getRosterAckCount conn (CeremonyId cid) = do
+  [Only n] <- query conn
+    "SELECT COUNT(*) FROM ceremony_participants WHERE ceremony_id = ? AND roster_signature IS NOT NULL"
+    (Only cid)
+  pure n
+
+getParticipantPublicKey :: Connection -> CeremonyId -> ParticipantId -> IO (Maybe ByteString)
+getParticipantPublicKey conn (CeremonyId cid) (ParticipantId pid) = do
+  rows <- query conn
+    "SELECT public_key FROM ceremony_participants WHERE ceremony_id = ? AND participant_id = ?"
+    (cid, pid)
+  pure $ case rows of
+    [Only pk] -> Just pk
+    _         -> Nothing
+
+-- | Build a roster from ceremony participant rows, sorted by participant_id
+participantRowsToRoster :: [CeremonyParticipantRow] -> Roster
+participantRowsToRoster rows =
+  sortBy (comparing fst)
+    [(ParticipantId (cprParticipantId r), cprPublicKey r) | r <- rows]
+
 -- === Row types ===
 
 data CeremonyRow = CeremonyRow
@@ -345,6 +435,7 @@ data CeremonyRow = CeremonyRow
   , crRevealDeadline         :: Maybe UTCTime
   , crNonParticipationPolicy :: Maybe Text
   , crBeaconSpec             :: Maybe Value
+  , crIdentityMode           :: Text
   , crPhase                  :: Text
   , crCreatedBy              :: UUID
   , crCreatedAt              :: UTCTime
@@ -354,7 +445,7 @@ instance FromRow CeremonyRow where
   fromRow = CeremonyRow
     <$> field <*> field <*> field <*> field <*> field
     <*> field <*> field <*> field <*> field <*> field
-    <*> field <*> field <*> field
+    <*> field <*> field <*> field <*> field
 
 data CommitmentRow = CommitmentRow
   { cmrCeremonyId    :: UUID
@@ -425,7 +516,7 @@ ceremonyRowToDomain CeremonyRow{..} = Ceremony
   , question = crQuestion
   , ceremonyType = case Aeson.fromJSON crCeremonyType of
       Aeson.Success ct -> ct
-      _                -> CoinFlip
+      _                -> CoinFlip "Heads" "Tails"
   , entropyMethod = parseEntropyMethod crEntropyMethod
   , requiredParties = fromIntegral crRequiredParties
   , commitmentMode = parseCommitmentMode crCommitmentMode
@@ -435,6 +526,7 @@ ceremonyRowToDomain CeremonyRow{..} = Ceremony
   , beaconSpec = crBeaconSpec >>= \v -> case Aeson.fromJSON v of
       Aeson.Success bs -> Just bs
       _                -> Nothing
+  , identityMode = parseIdentityMode crIdentityMode
   , phase = parsePhase crPhase
   , createdBy = ParticipantId crCreatedBy
   , createdAt = crCreatedAt
@@ -481,18 +573,23 @@ eventTypeName = \case
   CeremonyCancelled{}        -> "ceremony_cancelled"
   CeremonyDisputed{}         -> "ceremony_disputed"
   DeadlineExtended{}         -> "deadline_extended"
+  ParticipantJoined{}        -> "participant_joined"
+  RosterFinalized{}          -> "roster_finalized"
+  RosterAcknowledged{}       -> "roster_acknowledged"
 
 parsePhase :: Text -> Phase
 parsePhase = \case
-  "pending"          -> Pending
-  "awaiting_reveals" -> AwaitingReveals
-  "awaiting_beacon"  -> AwaitingBeacon
-  "resolving"        -> Resolving
-  "finalized"        -> Finalized
-  "expired"          -> Expired
-  "cancelled"        -> Cancelled
-  "disputed"         -> Disputed
-  x                  -> error ("Unknown phase: " <> T.unpack x)
+  "gathering"             -> Gathering
+  "awaiting_roster_acks"  -> AwaitingRosterAcks
+  "pending"               -> Pending
+  "awaiting_reveals"      -> AwaitingReveals
+  "awaiting_beacon"       -> AwaitingBeacon
+  "resolving"             -> Resolving
+  "finalized"             -> Finalized
+  "expired"               -> Expired
+  "cancelled"             -> Cancelled
+  "disputed"              -> Disputed
+  x                       -> error ("Unknown phase: " <> T.unpack x)
 
 parseEntropyMethod :: Text -> EntropyMethod
 parseEntropyMethod = \case
@@ -523,14 +620,16 @@ safeHead (x:_) = Just x
 
 showPhase :: Phase -> Text
 showPhase = \case
-  Pending         -> "pending"
-  AwaitingReveals -> "awaiting_reveals"
-  AwaitingBeacon  -> "awaiting_beacon"
-  Resolving       -> "resolving"
-  Finalized       -> "finalized"
-  Expired         -> "expired"
-  Cancelled       -> "cancelled"
-  Disputed        -> "disputed"
+  Gathering          -> "gathering"
+  AwaitingRosterAcks -> "awaiting_roster_acks"
+  Pending            -> "pending"
+  AwaitingReveals    -> "awaiting_reveals"
+  AwaitingBeacon     -> "awaiting_beacon"
+  Resolving          -> "resolving"
+  Finalized          -> "finalized"
+  Expired            -> "expired"
+  Cancelled          -> "cancelled"
+  Disputed           -> "disputed"
 
 showEntropyMethod :: EntropyMethod -> Text
 showEntropyMethod = \case
@@ -549,3 +648,14 @@ showNonParticipationPolicy = \case
   DefaultSubstitution -> "default_substitution"
   Exclusion           -> "exclusion"
   Cancellation        -> "cancellation"
+
+parseIdentityMode :: Text -> IdentityMode
+parseIdentityMode = \case
+  "anonymous"      -> Anonymous
+  "self_certified" -> SelfCertified
+  x                -> error ("Unknown identity mode: " <> T.unpack x)
+
+showIdentityMode :: IdentityMode -> Text
+showIdentityMode = \case
+  Anonymous     -> "anonymous"
+  SelfCertified -> "self_certified"

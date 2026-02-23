@@ -123,7 +123,7 @@ fullPipelineVector =
       -- Provide them in reverse order to test sorting
       contributions = [c2, c1]
       combinedFull = combineEntropy contributions
-      outcome = resolve CoinFlip contributions
+      outcome = resolve (CoinFlip "Heads" "Tails") contributions
   in object
     [ "contributions" .=
         [ object [ "source" .= ("ParticipantEntropy" :: String)
@@ -137,8 +137,8 @@ fullPipelineVector =
         ]
     , "combined_entropy" .= toHex combinedFull
     , "coin_flip_result" .= case outcomeValue outcome of
-        CoinFlipResult b -> toJSON b
-        _ -> toJSON False
+        CoinFlipResult label -> toJSON label
+        _ -> toJSON ("" :: String)
     ]
 
 -- | Mixed source types: tests that cross-type priority sorting works correctly.

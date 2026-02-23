@@ -70,6 +70,8 @@ library
     Veritas.Crypto.Signatures
     Veritas.Crypto.CommitReveal
     Veritas.Crypto.VRF
+    Veritas.Crypto.Roster
+    Veritas.Crypto.CeremonyParams
     Veritas.Crypto.BLS
     Veritas.API.Types
     Veritas.API.Handlers
@@ -123,6 +125,8 @@ test-suite veritas-tests
     Veritas.Core.RevealSpec
     Veritas.Crypto.HashSpec
     Veritas.Crypto.CommitRevealSpec
+    Veritas.Crypto.RosterSpec
+    Veritas.Crypto.CeremonyParamsSpec
     Veritas.Crypto.BLSSpec
     Veritas.External.DrandSpec
     Properties.StateMachineProperties

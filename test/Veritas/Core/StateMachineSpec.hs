@@ -8,6 +8,10 @@ import Test.Hspec
 
 import Veritas.Core.Types
 import Veritas.Core.StateMachine
+import Veritas.Crypto.Signatures (generateKeyPair, signMsg, publicKeyBytes, KeyPair(..))
+import qualified Data.ByteString as BS
+import Veritas.Crypto.Roster (buildRosterPayload)
+import Veritas.Crypto.CeremonyParams (computeParamsHash)
 
 -- Test helpers
 testCeremonyId :: CeremonyId
@@ -25,11 +29,14 @@ futureTime = addUTCTime 3600
 pastTime :: UTCTime -> UTCTime
 pastTime = addUTCTime (-3600)
 
+testParticipant3 :: ParticipantId
+testParticipant3 = ParticipantId (UUID.fromWords 3 0 0 0)
+
 mkCeremony :: EntropyMethod -> CommitmentMode -> Natural -> UTCTime -> Ceremony
 mkCeremony method mode parties deadline = Ceremony
   { ceremonyId = testCeremonyId
   , question = "Test question"
-  , ceremonyType = CoinFlip
+  , ceremonyType = CoinFlip "Heads" "Tails"
   , entropyMethod = method
   , requiredParties = parties
   , commitmentMode = mode
@@ -37,10 +44,18 @@ mkCeremony method mode parties deadline = Ceremony
   , revealDeadline = Just (addUTCTime 7200 deadline)
   , nonParticipationPolicy = Just Cancellation
   , beaconSpec = Nothing
+  , identityMode = Anonymous
   , phase = Pending
   , createdBy = testParticipant1
   , createdAt = deadline
   }
+
+mkSelfCertifiedCeremony :: EntropyMethod -> CommitmentMode -> Natural -> UTCTime -> Ceremony
+mkSelfCertifiedCeremony method mode parties deadline =
+  (mkCeremony method mode parties deadline)
+    { identityMode = SelfCertified
+    , phase = Gathering
+    }
 
 mkCommitment :: ParticipantId -> Maybe ByteString -> UTCTime -> Commitment
 mkCommitment pid seal ts = Commitment
@@ -216,7 +231,7 @@ spec = do
         let ceremony = (mkCeremony OfficiantVRF Immediate 2 (futureTime now))
               { phase = Resolving }
             outcome = Outcome
-              { outcomeValue = CoinFlipResult True
+              { outcomeValue = CoinFlipResult "Heads"
               , combinedEntropy = "entropy"
               , outcomeProof = OutcomeProof [] "test"
               }
@@ -331,3 +346,125 @@ spec = do
         isTerminal AwaitingReveals `shouldBe` False
         isTerminal AwaitingBeacon `shouldBe` False
         isTerminal Resolving `shouldBe` False
+        isTerminal Gathering `shouldBe` False
+        isTerminal AwaitingRosterAcks `shouldBe` False
+
+    describe "Gathering phase" $ do
+      it "accepts a participant registration" $ do
+        now <- getCurrentTime
+        let ceremony = mkSelfCertifiedCeremony OfficiantVRF Immediate 2 (futureTime now)
+        kp <- generateKeyPair
+        let pk = publicKeyBytes (kpPublic kp)
+            reg = ParticipantRegistration
+              { prCeremony = testCeremonyId
+              , prParticipant = testParticipant1
+              , prPublicKey = pk
+              , prDisplayName = Just "Alice"
+              , prJoinedAt = now
+              }
+        case transitionWith [] 0 ceremony [] [] (RegisterParticipant reg) of
+          Right TransitionResult{..} ->
+            trNewPhase `shouldBe` Gathering  -- 1/2, not yet quorum
+          Left err -> expectationFailure $ "Expected success, got: " ++ show err
+
+      it "rejects duplicate registration" $ do
+        now <- getCurrentTime
+        let ceremony = mkSelfCertifiedCeremony OfficiantVRF Immediate 2 (futureTime now)
+        kp <- generateKeyPair
+        let pk = publicKeyBytes (kpPublic kp)
+            roster = [(testParticipant1, pk)]
+            reg = ParticipantRegistration
+              { prCeremony = testCeremonyId
+              , prParticipant = testParticipant1
+              , prPublicKey = pk
+              , prDisplayName = Nothing
+              , prJoinedAt = now
+              }
+        case transitionWith roster 0 ceremony [] [] (RegisterParticipant reg) of
+          Left (AlreadyJoined _) -> pure ()
+          other -> expectationFailure $ "Expected AlreadyJoined, got: " ++ show other
+
+      it "transitions to AwaitingRosterAcks when quorum reached (Immediate)" $ do
+        now <- getCurrentTime
+        let ceremony = mkSelfCertifiedCeremony OfficiantVRF Immediate 2 (futureTime now)
+        kp1 <- generateKeyPair
+        kp2 <- generateKeyPair
+        let pk1 = publicKeyBytes (kpPublic kp1)
+            pk2 = publicKeyBytes (kpPublic kp2)
+            roster = [(testParticipant1, pk1)]
+            reg = ParticipantRegistration
+              { prCeremony = testCeremonyId
+              , prParticipant = testParticipant2
+              , prPublicKey = pk2
+              , prDisplayName = Nothing
+              , prJoinedAt = now
+              }
+        case transitionWith roster 0 ceremony [] [] (RegisterParticipant reg) of
+          Right TransitionResult{..} ->
+            trNewPhase `shouldBe` AwaitingRosterAcks
+          Left err -> expectationFailure $ "Expected AwaitingRosterAcks, got: " ++ show err
+
+      it "expires when deadline passes without quorum" $ do
+        now <- getCurrentTime
+        let ceremony = mkSelfCertifiedCeremony OfficiantVRF Immediate 2 (pastTime now)
+        case transitionWith [] 0 ceremony [] [] (CheckDeadline now) of
+          Right TransitionResult{..} ->
+            trNewPhase `shouldBe` Expired
+          Left err -> expectationFailure $ "Expected Expired, got: " ++ show err
+
+    describe "AwaitingRosterAcks phase" $ do
+      it "accepts an acknowledgment" $ do
+        now <- getCurrentTime
+        let ceremony = (mkSelfCertifiedCeremony OfficiantVRF Immediate 2 (futureTime now))
+              { phase = AwaitingRosterAcks }
+            paramsHash = computeParamsHash ceremony
+        kp1 <- generateKeyPair
+        kp2 <- generateKeyPair
+        let pk1 = publicKeyBytes (kpPublic kp1)
+            pk2 = publicKeyBytes (kpPublic kp2)
+            roster = [(testParticipant1, pk1), (testParticipant2, pk2)]
+            sig = signMsg (kpSecret kp1) (kpPublic kp1) (buildRosterPayload testCeremonyId paramsHash roster)
+        case transitionWith roster 0 ceremony [] [] (AcknowledgeRoster testParticipant1 sig) of
+          Right TransitionResult{..} ->
+            trNewPhase `shouldBe` AwaitingRosterAcks  -- 1/2 acked
+          Left err -> expectationFailure $ "Expected success, got: " ++ show err
+
+      it "transitions to Pending when all acked" $ do
+        now <- getCurrentTime
+        let ceremony = (mkSelfCertifiedCeremony OfficiantVRF Immediate 2 (futureTime now))
+              { phase = AwaitingRosterAcks }
+            paramsHash = computeParamsHash ceremony
+        kp1 <- generateKeyPair
+        kp2 <- generateKeyPair
+        let pk1 = publicKeyBytes (kpPublic kp1)
+            pk2 = publicKeyBytes (kpPublic kp2)
+            roster = [(testParticipant1, pk1), (testParticipant2, pk2)]
+            sig = signMsg (kpSecret kp2) (kpPublic kp2) (buildRosterPayload testCeremonyId paramsHash roster)
+        -- 1 already acked, this is the 2nd
+        case transitionWith roster 1 ceremony [] [] (AcknowledgeRoster testParticipant2 sig) of
+          Right TransitionResult{..} ->
+            trNewPhase `shouldBe` Pending
+          Left err -> expectationFailure $ "Expected Pending, got: " ++ show err
+
+      it "rejects ack from non-joined participant" $ do
+        now <- getCurrentTime
+        let ceremony = (mkSelfCertifiedCeremony OfficiantVRF Immediate 2 (futureTime now))
+              { phase = AwaitingRosterAcks }
+        kp1 <- generateKeyPair
+        let pk1 = publicKeyBytes (kpPublic kp1)
+            roster = [(testParticipant1, pk1)]
+        case transitionWith roster 0 ceremony [] [] (AcknowledgeRoster testParticipant2 "fakesig") of
+          Left (NotJoined _) -> pure ()
+          other -> expectationFailure $ "Expected NotJoined, got: " ++ show other
+
+      it "expires when deadline passes" $ do
+        now <- getCurrentTime
+        let ceremony = (mkSelfCertifiedCeremony OfficiantVRF Immediate 2 (pastTime now))
+              { phase = AwaitingRosterAcks }
+        kp1 <- generateKeyPair
+        let pk1 = publicKeyBytes (kpPublic kp1)
+            roster = [(testParticipant1, pk1)]
+        case transitionWith roster 0 ceremony [] [] (CheckDeadline now) of
+          Right TransitionResult{..} ->
+            trNewPhase `shouldBe` Expired
+          Left err -> expectationFailure $ "Expected Expired, got: " ++ show err

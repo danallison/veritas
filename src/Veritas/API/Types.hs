@@ -9,6 +9,8 @@ module Veritas.API.Types
   , CreateCeremonyRequest(..)
   , CommitRequest(..)
   , RevealRequest(..)
+  , JoinRequest(..)
+  , AckRosterRequest(..)
 
     -- * Response types
   , CeremonyResponse(..)
@@ -25,6 +27,10 @@ module Veritas.API.Types
   , RandomUUIDResponse(..)
   , ServerPubKeyResponse(..)
   , BeaconVerificationGuideResponse(..)
+  , JoinResponse(..)
+  , AckRosterResponse(..)
+  , RosterResponse(..)
+  , RosterEntryResponse(..)
   ) where
 
 import Data.Aeson (FromJSON(..), ToJSON(..), Value, withObject, (.:), (.:?), object, (.=))
@@ -41,7 +47,7 @@ import GHC.Generics (Generic)
 import GHC.Natural (Natural)
 import Servant.API
 
-import Veritas.Core.Types (Phase, CeremonyType, EntropyMethod, CommitmentMode, NonParticipationPolicy, BeaconSpec)
+import Veritas.Core.Types (Phase, CeremonyType, EntropyMethod, CommitmentMode, NonParticipationPolicy, BeaconSpec, IdentityMode)
 
 -- | The full Veritas API
 type VeritasAPI =
@@ -54,6 +60,11 @@ type VeritasAPI =
   :<|> "ceremonies" :> Capture "id" UUID :> "outcome" :> Get '[JSON] OutcomeResponse
   :<|> "ceremonies" :> Capture "id" UUID :> "log" :> Get '[JSON] AuditLogResponse
   :<|> "ceremonies" :> Capture "id" UUID :> "verify" :> Get '[JSON] VerifyResponse
+
+       -- Self-certified ceremony identity
+  :<|> "ceremonies" :> Capture "id" UUID :> "join" :> ReqBody '[JSON] JoinRequest :> Post '[JSON] JoinResponse
+  :<|> "ceremonies" :> Capture "id" UUID :> "ack-roster" :> ReqBody '[JSON] AckRosterRequest :> Post '[JSON] AckRosterResponse
+  :<|> "ceremonies" :> Capture "id" UUID :> "roster" :> Get '[JSON] RosterResponse
 
        -- Standalone random
   :<|> "random" :> "coin" :> Get '[JSON] RandomCoinResponse
@@ -89,6 +100,7 @@ data CreateCeremonyRequest = CreateCeremonyRequest
   , crqNonParticipationPolicy :: Maybe NonParticipationPolicy
   , crqBeaconSpec             :: Maybe BeaconSpec
   , crqCreatedBy              :: Maybe UUID
+  , crqIdentityMode           :: Maybe IdentityMode
   } deriving stock (Eq, Show, Generic)
 
 instance FromJSON CreateCeremonyRequest where
@@ -103,6 +115,7 @@ instance FromJSON CreateCeremonyRequest where
     <*> o .:? "non_participation_policy"
     <*> o .:? "beacon_spec"
     <*> o .:? "created_by"
+    <*> o .:? "identity_mode"
 
 instance ToJSON CreateCeremonyRequest where
   toJSON r = object
@@ -116,12 +129,14 @@ instance ToJSON CreateCeremonyRequest where
     , "non_participation_policy" .= crqNonParticipationPolicy r
     , "beacon_spec"              .= crqBeaconSpec r
     , "created_by"               .= crqCreatedBy r
+    , "identity_mode"            .= crqIdentityMode r
     ]
 
 data CommitRequest = CommitRequest
   { cmrqParticipantId :: UUID
   , cmrqEntropySeal   :: Maybe Text
   , cmrqDisplayName   :: Maybe Text
+  , cmrqSignature     :: Maybe Text  -- ^ Ed25519 signature (required for self-certified)
   } deriving stock (Eq, Show, Generic)
 
 instance FromJSON CommitRequest where
@@ -129,12 +144,14 @@ instance FromJSON CommitRequest where
     <$> o .: "participant_id"
     <*> o .:? "entropy_seal"
     <*> o .:? "display_name"
+    <*> o .:? "signature"
 
 instance ToJSON CommitRequest where
   toJSON r = object
     [ "participant_id" .= cmrqParticipantId r
     , "entropy_seal"   .= cmrqEntropySeal r
     , "display_name"   .= cmrqDisplayName r
+    , "signature"      .= cmrqSignature r
     ]
 
 data RevealRequest = RevealRequest
@@ -153,7 +170,106 @@ instance ToJSON RevealRequest where
     , "entropy_value"  .= rvrqEntropyValue r
     ]
 
+data JoinRequest = JoinRequest
+  { jrqParticipantId :: UUID
+  , jrqPublicKey     :: Text  -- hex-encoded 32 bytes
+  , jrqDisplayName   :: Maybe Text
+  } deriving stock (Eq, Show, Generic)
+
+instance FromJSON JoinRequest where
+  parseJSON = withObject "JoinRequest" $ \o -> JoinRequest
+    <$> o .: "participant_id"
+    <*> o .: "public_key"
+    <*> o .:? "display_name"
+
+instance ToJSON JoinRequest where
+  toJSON r = object
+    [ "participant_id" .= jrqParticipantId r
+    , "public_key"     .= jrqPublicKey r
+    , "display_name"   .= jrqDisplayName r
+    ]
+
+data AckRosterRequest = AckRosterRequest
+  { arrqParticipantId :: UUID
+  , arrqSignature     :: Text  -- hex-encoded Ed25519 signature
+  } deriving stock (Eq, Show, Generic)
+
+instance FromJSON AckRosterRequest where
+  parseJSON = withObject "AckRosterRequest" $ \o -> AckRosterRequest
+    <$> o .: "participant_id"
+    <*> o .: "signature"
+
+instance ToJSON AckRosterRequest where
+  toJSON r = object
+    [ "participant_id" .= arrqParticipantId r
+    , "signature"      .= arrqSignature r
+    ]
+
 -- === Response types ===
+
+data JoinResponse = JoinResponse
+  { jrStatus :: Text
+  , jrPhase  :: Phase
+  } deriving stock (Eq, Show, Generic)
+
+instance ToJSON JoinResponse where
+  toJSON r = object ["status" .= jrStatus r, "phase" .= jrPhase r]
+
+instance FromJSON JoinResponse where
+  parseJSON = withObject "JoinResponse" $ \o -> JoinResponse
+    <$> o .: "status"
+    <*> o .: "phase"
+
+data AckRosterResponse = AckRosterResponse
+  { arrStatus :: Text
+  , arrPhase  :: Phase
+  } deriving stock (Eq, Show, Generic)
+
+instance ToJSON AckRosterResponse where
+  toJSON r = object ["status" .= arrStatus r, "phase" .= arrPhase r]
+
+instance FromJSON AckRosterResponse where
+  parseJSON = withObject "AckRosterResponse" $ \o -> AckRosterResponse
+    <$> o .: "status"
+    <*> o .: "phase"
+
+data RosterEntryResponse = RosterEntryResponse
+  { reParticipantId :: UUID
+  , rePublicKey     :: Text
+  , reDisplayName   :: Maybe Text
+  , reAcknowledged  :: Bool
+  } deriving stock (Eq, Show, Generic)
+
+instance ToJSON RosterEntryResponse where
+  toJSON r = object
+    [ "participant_id" .= reParticipantId r
+    , "public_key"     .= rePublicKey r
+    , "display_name"   .= reDisplayName r
+    , "acknowledged"   .= reAcknowledged r
+    ]
+
+instance FromJSON RosterEntryResponse where
+  parseJSON = withObject "RosterEntryResponse" $ \o -> RosterEntryResponse
+    <$> o .: "participant_id"
+    <*> o .: "public_key"
+    <*> o .:? "display_name"
+    <*> o .: "acknowledged"
+
+data RosterResponse = RosterResponse
+  { rrParticipants :: [RosterEntryResponse]
+  , rrLocked       :: Bool
+  } deriving stock (Eq, Show, Generic)
+
+instance ToJSON RosterResponse where
+  toJSON r = object
+    [ "participants" .= rrParticipants r
+    , "locked"       .= rrLocked r
+    ]
+
+instance FromJSON RosterResponse where
+  parseJSON = withObject "RosterResponse" $ \o -> RosterResponse
+    <$> o .: "participants"
+    <*> o .: "locked"
 
 data CommittedParticipantResponse = CommittedParticipantResponse
   { cprParticipantId :: UUID
@@ -182,11 +298,14 @@ data CeremonyResponse = CeremonyResponse
   , crspRevealDeadline          :: Maybe UTCTime
   , crspNonParticipationPolicy  :: Maybe NonParticipationPolicy
   , crspBeaconSpec              :: Maybe BeaconSpec
+  , crspIdentityMode            :: IdentityMode
   , crspPhase                   :: Phase
   , crspCreatedBy               :: UUID
   , crspCreatedAt               :: UTCTime
   , crspCommitmentCount         :: Int
   , crspCommittedParticipants   :: [CommittedParticipantResponse]
+  , crspRoster                  :: Maybe [RosterEntryResponse]
+  , crspParamsHash              :: Text
   } deriving stock (Eq, Show, Generic)
 
 instance ToJSON CeremonyResponse where
@@ -201,11 +320,14 @@ instance ToJSON CeremonyResponse where
     , "reveal_deadline"          .= crspRevealDeadline r
     , "non_participation_policy" .= crspNonParticipationPolicy r
     , "beacon_spec"              .= crspBeaconSpec r
+    , "identity_mode"            .= crspIdentityMode r
     , "phase"                    .= crspPhase r
     , "created_by"               .= crspCreatedBy r
     , "created_at"               .= crspCreatedAt r
     , "commitment_count"         .= crspCommitmentCount r
     , "committed_participants"   .= crspCommittedParticipants r
+    , "roster"                   .= crspRoster r
+    , "params_hash"              .= crspParamsHash r
     ]
 
 instance FromJSON CeremonyResponse where
@@ -220,11 +342,14 @@ instance FromJSON CeremonyResponse where
     <*> o .:? "reveal_deadline"
     <*> o .:? "non_participation_policy"
     <*> o .:? "beacon_spec"
+    <*> o .: "identity_mode"
     <*> o .: "phase"
     <*> o .: "created_by"
     <*> o .: "created_at"
     <*> o .: "commitment_count"
     <*> o .: "committed_participants"
+    <*> o .:? "roster"
+    <*> o .: "params_hash"
 
 data CommitResponse = CommitResponse
   { cmrStatus :: Text
@@ -433,6 +558,7 @@ instance ToSchema CreateCeremonyRequest where
       , ("non_participation_policy", mempty & OA.type_ ?~ OA.OpenApiString & OA.description ?~ "DefaultSubstitution | Exclusion | Cancellation")
       , ("beacon_spec", mempty & OA.description ?~ "Beacon source configuration (required for ExternalBeacon/Combined)")
       , ("created_by", mempty & OA.type_ ?~ OA.OpenApiString & OA.format ?~ "uuid" & OA.description ?~ "Participant ID of the creator (generated if omitted)")
+      , ("identity_mode", mempty & OA.type_ ?~ OA.OpenApiString & OA.description ?~ "Anonymous (default) | SelfCertified")
       ]
     & OA.required .~ ["question", "ceremony_type", "entropy_method", "required_parties", "commitment_mode", "commit_deadline"]
 
@@ -443,6 +569,7 @@ instance ToSchema CommitRequest where
       [ ("participant_id", mempty & OA.type_ ?~ OA.OpenApiString & OA.format ?~ "uuid")
       , ("entropy_seal", mempty & OA.type_ ?~ OA.OpenApiString & OA.description ?~ "SHA-256 seal of entropy (required for ParticipantReveal/Combined)")
       , ("display_name", mempty & OA.type_ ?~ OA.OpenApiString & OA.description ?~ "Optional display name for the participant")
+      , ("signature", mempty & OA.type_ ?~ OA.OpenApiString & OA.description ?~ "Hex-encoded Ed25519 signature (required for self-certified ceremonies)")
       ]
     & OA.required .~ ["participant_id"]
 
@@ -469,11 +596,14 @@ instance ToSchema CeremonyResponse where
       , ("reveal_deadline", mempty & OA.type_ ?~ OA.OpenApiString & OA.format ?~ "date-time")
       , ("non_participation_policy", mempty & OA.type_ ?~ OA.OpenApiString)
       , ("beacon_spec", mempty)
-      , ("phase", mempty & OA.type_ ?~ OA.OpenApiString & OA.description ?~ "Pending | AwaitingReveals | AwaitingBeacon | Resolving | Finalized | Expired | Cancelled | Disputed")
+      , ("identity_mode", mempty & OA.type_ ?~ OA.OpenApiString & OA.description ?~ "Anonymous | SelfCertified")
+      , ("phase", mempty & OA.type_ ?~ OA.OpenApiString & OA.description ?~ "Gathering | AwaitingRosterAcks | Pending | AwaitingReveals | AwaitingBeacon | Resolving | Finalized | Expired | Cancelled | Disputed")
       , ("created_by", mempty & OA.type_ ?~ OA.OpenApiString & OA.format ?~ "uuid")
       , ("created_at", mempty & OA.type_ ?~ OA.OpenApiString & OA.format ?~ "date-time")
       , ("commitment_count", mempty & OA.type_ ?~ OA.OpenApiInteger)
       , ("committed_participants", mempty & OA.type_ ?~ OA.OpenApiArray & OA.description ?~ "List of committed participants with optional display names")
+      , ("roster", mempty & OA.type_ ?~ OA.OpenApiArray & OA.description ?~ "Roster of registered participants (self-certified ceremonies only)")
+      , ("params_hash", mempty & OA.type_ ?~ OA.OpenApiString & OA.description ?~ "SHA-256 hash of canonical ceremony parameters (hex-encoded)")
       ]
 
 instance ToSchema CommitResponse where
@@ -577,3 +707,57 @@ instance ToSchema BeaconVerificationGuideResponse where
       , ("dst", mempty & OA.type_ ?~ OA.OpenApiString & OA.description ?~ "Domain Separation Tag for BLS signature verification")
       , ("steps", mempty & OA.type_ ?~ OA.OpenApiArray & OA.description ?~ "Ordered list of human-readable verification steps")
       ]
+
+instance ToSchema JoinRequest where
+  declareNamedSchema _ = pure $ OA.NamedSchema (Just "JoinRequest") $ mempty
+    & OA.type_ ?~ OA.OpenApiObject
+    & OA.properties .~ props
+      [ ("participant_id", mempty & OA.type_ ?~ OA.OpenApiString & OA.format ?~ "uuid")
+      , ("public_key", mempty & OA.type_ ?~ OA.OpenApiString & OA.description ?~ "Hex-encoded Ed25519 public key (32 bytes)")
+      , ("display_name", mempty & OA.type_ ?~ OA.OpenApiString)
+      ]
+    & OA.required .~ ["participant_id", "public_key"]
+
+instance ToSchema AckRosterRequest where
+  declareNamedSchema _ = pure $ OA.NamedSchema (Just "AckRosterRequest") $ mempty
+    & OA.type_ ?~ OA.OpenApiObject
+    & OA.properties .~ props
+      [ ("participant_id", mempty & OA.type_ ?~ OA.OpenApiString & OA.format ?~ "uuid")
+      , ("signature", mempty & OA.type_ ?~ OA.OpenApiString & OA.description ?~ "Hex-encoded Ed25519 signature over canonical roster payload")
+      ]
+    & OA.required .~ ["participant_id", "signature"]
+
+instance ToSchema JoinResponse where
+  declareNamedSchema _ = pure $ OA.NamedSchema (Just "JoinResponse") $ mempty
+    & OA.type_ ?~ OA.OpenApiObject
+    & OA.properties .~ props
+      [ ("status", mempty & OA.type_ ?~ OA.OpenApiString)
+      , ("phase", mempty & OA.type_ ?~ OA.OpenApiString)
+      ]
+
+instance ToSchema AckRosterResponse where
+  declareNamedSchema _ = pure $ OA.NamedSchema (Just "AckRosterResponse") $ mempty
+    & OA.type_ ?~ OA.OpenApiObject
+    & OA.properties .~ props
+      [ ("status", mempty & OA.type_ ?~ OA.OpenApiString)
+      , ("phase", mempty & OA.type_ ?~ OA.OpenApiString)
+      ]
+
+instance ToSchema RosterResponse where
+  declareNamedSchema _ = pure $ OA.NamedSchema (Just "RosterResponse") $ mempty
+    & OA.type_ ?~ OA.OpenApiObject
+    & OA.properties .~ props
+      [ ("participants", mempty & OA.type_ ?~ OA.OpenApiArray)
+      , ("locked", mempty & OA.type_ ?~ OA.OpenApiBoolean)
+      ]
+
+instance ToSchema RosterEntryResponse where
+  declareNamedSchema _ = pure $ OA.NamedSchema (Just "RosterEntryResponse") $ mempty
+    & OA.type_ ?~ OA.OpenApiObject
+    & OA.properties .~ props
+      [ ("participant_id", mempty & OA.type_ ?~ OA.OpenApiString & OA.format ?~ "uuid")
+      , ("public_key", mempty & OA.type_ ?~ OA.OpenApiString)
+      , ("display_name", mempty & OA.type_ ?~ OA.OpenApiString)
+      , ("acknowledged", mempty & OA.type_ ?~ OA.OpenApiBoolean)
+      ]
+

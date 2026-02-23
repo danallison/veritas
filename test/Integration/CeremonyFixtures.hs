@@ -27,7 +27,7 @@ mkVRFCeremonyReq numParties = do
   now <- getCurrentTime
   pure CreateCeremonyRequest
     { crqQuestion               = "Test VRF ceremony"
-    , crqCeremonyType           = CoinFlip
+    , crqCeremonyType           = CoinFlip "Heads" "Tails"
     , crqEntropyMethod          = OfficiantVRF
     , crqRequiredParties        = numParties
     , crqCommitmentMode         = Immediate
@@ -36,6 +36,7 @@ mkVRFCeremonyReq numParties = do
     , crqNonParticipationPolicy = Nothing
     , crqBeaconSpec             = Nothing
     , crqCreatedBy              = Nothing
+    , crqIdentityMode           = Nothing
     }
 
 -- | Create a request for a ParticipantReveal ceremony.
@@ -45,7 +46,7 @@ mkParticipantRevealCeremonyReq numParties = do
   now <- getCurrentTime
   pure CreateCeremonyRequest
     { crqQuestion               = "Test participant-reveal ceremony"
-    , crqCeremonyType           = CoinFlip
+    , crqCeremonyType           = CoinFlip "Heads" "Tails"
     , crqEntropyMethod          = ParticipantReveal
     , crqRequiredParties        = numParties
     , crqCommitmentMode         = Immediate
@@ -54,6 +55,7 @@ mkParticipantRevealCeremonyReq numParties = do
     , crqNonParticipationPolicy = Just Exclusion
     , crqBeaconSpec             = Nothing
     , crqCreatedBy              = Nothing
+    , crqIdentityMode           = Nothing
     }
 
 -- | Create a commit request without a seal (for VRF ceremonies).
@@ -62,6 +64,7 @@ mkCommitRequest pid = CommitRequest
   { cmrqParticipantId = pid
   , cmrqEntropySeal   = Nothing
   , cmrqDisplayName   = Nothing
+  , cmrqSignature     = Nothing
   }
 
 -- | Create a commit request with an entropy seal (for ParticipantReveal).
@@ -74,6 +77,7 @@ mkCommitRequestWithSeal ceremonyUuid pid idx =
     { cmrqParticipantId = pid
     , cmrqEntropySeal   = Just (hexEncode seal)
     , cmrqDisplayName   = Just ("Participant " <> T.pack (show idx))
+    , cmrqSignature     = Nothing
     }
 
 -- | Create a reveal request with hex-encoded entropy matching the seal.

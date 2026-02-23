@@ -69,4 +69,4 @@ spec = do
         not (BS.null bs) ==>
           let cid = CeremonyId UUID.nil
               c = EntropyContribution cid (VRFEntropy (VRFOutput bs "proof" "pk")) bs
-          in resolve CoinFlip [c] == resolve CoinFlip [c]
+          in resolve (CoinFlip "Heads" "Tails") [c] == resolve (CoinFlip "Heads" "Tails") [c]

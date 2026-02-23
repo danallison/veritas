@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../api/client'
-import type { AuditLogResponse, AuditLogEntryResponse, EntropyMethod, CeremonyType } from '../api/types'
+import type { AuditLogResponse, AuditLogEntryResponse, EntropyMethod, CeremonyType, IdentityMode } from '../api/types'
 
 interface BeaconData {
   network: string
@@ -95,6 +95,38 @@ function extractVerificationInfo(
   }
 }
 
+interface RosterParticipant {
+  participantId: string
+  publicKey: string
+  rosterSignature: string | null
+}
+
+function extractIdentityData(entries: AuditLogEntryResponse[]): RosterParticipant[] | null {
+  const rosterEvent = entries.find((e) => e.event_type === 'roster_finalized')
+  if (!rosterEvent) return null
+
+  const data = rosterEvent.event_data as Record<string, unknown>
+  const contents = data?.contents as [string, string][] | undefined
+  if (!contents) return null
+
+  // Build a map of participant_id → roster_signature from roster_acknowledged events
+  const ackMap = new Map<string, string>()
+  for (const entry of entries) {
+    if (entry.event_type === 'roster_acknowledged') {
+      const ackData = entry.event_data as Record<string, unknown>
+      const pid = ackData?.participant as string
+      const sig = ackData?.signature as string
+      if (pid && sig) ackMap.set(pid, sig)
+    }
+  }
+
+  return contents.map(([pid, pk]) => ({
+    participantId: pid,
+    publicKey: pk,
+    rosterSignature: ackMap.get(pid) ?? null,
+  }))
+}
+
 function formatOutcome(value: unknown, ceremonyType: CeremonyType): string {
   const v = value as Record<string, unknown>
   const tag = v?.tag as string
@@ -102,7 +134,7 @@ function formatOutcome(value: unknown, ceremonyType: CeremonyType): string {
 
   switch (tag) {
     case 'CoinFlipResult':
-      return contents ? 'Heads (true)' : 'Tails (false)'
+      return String(contents)
     case 'ChoiceResult':
     case 'WeightedChoiceResult':
       return String(contents)
@@ -150,10 +182,12 @@ export default function VerificationData({
   ceremonyId,
   entropyMethod,
   ceremonyType,
+  identityMode = 'Anonymous',
 }: {
   ceremonyId: string
   entropyMethod: EntropyMethod
   ceremonyType: CeremonyType
+  identityMode?: IdentityMode
 }) {
   const [log, setLog] = useState<AuditLogResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -167,6 +201,10 @@ export default function VerificationData({
 
   const info = extractVerificationInfo(log.entries, entropyMethod)
   if (!info) return null
+
+  const identityData = identityMode === 'SelfCertified'
+    ? extractIdentityData(log.entries)
+    : null
 
   const curlCommand = info.beacon
     ? `curl -s https://api.drand.sh/${info.beacon.network}/public/${info.beacon.round} | jq`
@@ -204,6 +242,57 @@ export default function VerificationData({
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {identityData && identityData.length > 0 && (
+        <div className="space-y-2">
+          <h4 className="text-sm font-medium text-gray-700">Participant Identity (Self-Certified)</h4>
+          <p className="text-xs text-gray-500">
+            Each participant registered a public key, signed the roster, and signed their
+            commitment. This constitutes non-repudiable proof of participation — denying
+            involvement requires claiming private key compromise.
+          </p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-gray-200">
+                  <th className="text-left py-1.5 pr-3">Participant</th>
+                  <th className="text-left py-1.5 pr-3">Public Key</th>
+                  <th className="text-left py-1.5">Roster Signature</th>
+                </tr>
+              </thead>
+              <tbody>
+                {identityData.map((p) => (
+                  <tr key={p.participantId} className="border-b border-gray-100">
+                    <td className="py-1.5 pr-3 font-mono text-gray-600">
+                      {p.participantId.slice(0, 8)}...
+                    </td>
+                    <td className="py-1.5 pr-3">
+                      <div className="flex items-center gap-1">
+                        <code className="font-mono break-all text-gray-800">
+                          {p.publicKey.slice(0, 16)}...
+                        </code>
+                        <CopyButton text={p.publicKey} />
+                      </div>
+                    </td>
+                    <td className="py-1.5">
+                      {p.rosterSignature ? (
+                        <div className="flex items-center gap-1">
+                          <code className="font-mono break-all text-gray-800">
+                            {p.rosterSignature.slice(0, 16)}...
+                          </code>
+                          <CopyButton text={p.rosterSignature} />
+                        </div>
+                      ) : (
+                        <span className="text-gray-400">—</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 

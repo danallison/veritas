@@ -13,6 +13,11 @@ import type {
   RandomUUIDResponse,
   HealthResponse,
   BeaconVerificationGuideResponse,
+  JoinRequest,
+  JoinResponse,
+  AckRosterRequest,
+  AckRosterResponse,
+  RosterResponse,
 } from './types'
 
 const BASE = import.meta.env.VITE_API_BASE ?? '/api'
@@ -46,6 +51,15 @@ const api = {
 
   listCeremonies: (phase?: string) =>
     get<CeremonyResponse[]>(`/ceremonies${phase ? `?phase=${phase}` : ''}`),
+
+  join: (id: string, req: JoinRequest) =>
+    post<JoinResponse>(`/ceremonies/${id}/join`, req),
+
+  ackRoster: (id: string, req: AckRosterRequest) =>
+    post<AckRosterResponse>(`/ceremonies/${id}/ack-roster`, req),
+
+  getRoster: (id: string) =>
+    get<RosterResponse>(`/ceremonies/${id}/roster`),
 
   commit: (id: string, req: CommitRequest) =>
     post<CommitResponse>(`/ceremonies/${id}/commit`, req),

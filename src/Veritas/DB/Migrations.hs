@@ -24,6 +24,9 @@ runMigrations conn = do
   execute_ conn "CREATE INDEX IF NOT EXISTS idx_ceremonies_phase ON ceremonies(phase)"
   execute_ conn "CREATE INDEX IF NOT EXISTS idx_ceremonies_phase_commit_deadline ON ceremonies(phase, commit_deadline)"
   execute_ conn "CREATE INDEX IF NOT EXISTS idx_ceremonies_phase_reveal_deadline ON ceremonies(phase, reveal_deadline)"
+  -- Phase 5: Self-contained ceremony identity
+  execute_ conn "ALTER TABLE ceremonies ADD COLUMN IF NOT EXISTS identity_mode TEXT NOT NULL DEFAULT 'anonymous'"
+  execute_ conn createCeremonyParticipantsTable
   pure ()
 
 createCeremoniesTable :: Query
@@ -102,6 +105,21 @@ createAuditLogTable =
   \  entry_hash       BYTEA NOT NULL,\
   \  created_at       TIMESTAMPTZ NOT NULL,\
   \  PRIMARY KEY (ceremony_id, sequence_num)\
+  \)"
+
+createCeremonyParticipantsTable :: Query
+createCeremonyParticipantsTable =
+  "CREATE TABLE IF NOT EXISTS ceremony_participants (\
+  \  id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),\
+  \  ceremony_id       UUID NOT NULL REFERENCES ceremonies(id),\
+  \  participant_id    UUID NOT NULL,\
+  \  public_key        BYTEA NOT NULL,\
+  \  display_name      TEXT,\
+  \  joined_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),\
+  \  roster_signature  BYTEA,\
+  \  acked_at          TIMESTAMPTZ,\
+  \  UNIQUE (ceremony_id, participant_id),\
+  \  UNIQUE (ceremony_id, public_key)\
   \)"
 
 -- Query type is imported from Database.PostgreSQL.Simple

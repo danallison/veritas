@@ -34,7 +34,7 @@ mkCeremony :: EntropyMethod -> CommitmentMode -> Natural -> UTCTime -> Ceremony
 mkCeremony method mode parties deadline = Ceremony
   { ceremonyId = testCeremonyId
   , question = "Test question"
-  , ceremonyType = CoinFlip
+  , ceremonyType = CoinFlip "Heads" "Tails"
   , entropyMethod = method
   , requiredParties = parties
   , commitmentMode = mode
@@ -42,6 +42,7 @@ mkCeremony method mode parties deadline = Ceremony
   , revealDeadline = Just (addUTCTime 7200 deadline)
   , nonParticipationPolicy = Just Cancellation
   , beaconSpec = Nothing
+  , identityMode = Anonymous
   , phase = Pending
   , createdBy = testParticipant1
   , createdAt = deadline
@@ -219,10 +220,10 @@ spec = do
                       -- Build contributions and resolve
                       let contributions = buildEntropyContributions testCeremonyId
                             [(testParticipant1, entropy1), (testParticipant2, entropy2)]
-                          outcome = resolve CoinFlip contributions
+                          outcome = resolve (CoinFlip "Heads" "Tails") contributions
 
                       -- Verify outcome is deterministic
-                      let outcome2 = resolve CoinFlip contributions
+                      let outcome2 = resolve (CoinFlip "Heads" "Tails") contributions
                       outcomeValue outcome `shouldBe` outcomeValue outcome2
                       combinedEntropy outcome `shouldBe` combinedEntropy outcome2
 
@@ -292,8 +293,8 @@ spec = do
                     , (testParticipant2, entropy2)
                     , (testParticipant3, defVal3)
                     ]
-                  outcome = resolve CoinFlip contributions
+                  outcome = resolve (CoinFlip "Heads" "Tails") contributions
 
               -- Outcome should be deterministic
-              let outcome2 = resolve CoinFlip contributions
+              let outcome2 = resolve (CoinFlip "Heads" "Tails") contributions
               outcomeValue outcome `shouldBe` outcomeValue outcome2

@@ -38,7 +38,7 @@ mkTestCeremony :: Ceremony
 mkTestCeremony = Ceremony
   { ceremonyId = CeremonyId UUID.nil
   , question = "test"
-  , ceremonyType = CoinFlip
+  , ceremonyType = CoinFlip "Heads" "Tails"
   , entropyMethod = OfficiantVRF
   , requiredParties = 2
   , commitmentMode = Immediate
@@ -46,6 +46,7 @@ mkTestCeremony = Ceremony
   , revealDeadline = Just (read "2030-01-01 01:00:00 UTC")
   , nonParticipationPolicy = Just Cancellation
   , beaconSpec = Nothing
+  , identityMode = Anonymous
   , phase = Pending
   , createdBy = ParticipantId UUID.nil
   , createdAt = read "2025-01-01 00:00:00 UTC"

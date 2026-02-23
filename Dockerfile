@@ -20,6 +20,6 @@ RUN cabal update && cabal build --only-dependencies --enable-tests -j4 2>&1 || t
 
 # Copy source and build
 COPY . .
-RUN cabal build
+RUN cabal build exe:veritas
 
 CMD ["cabal", "run", "veritas"]

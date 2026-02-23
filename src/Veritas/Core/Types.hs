@@ -8,6 +8,7 @@ module Veritas.Core.Types
   , CommitmentMode(..)
   , EntropyMethod(..)
   , NonParticipationPolicy(..)
+  , IdentityMode(..)
   , CeremonyType(..)
   , BeaconSpec(..)
   , BeaconFallback(..)
@@ -20,6 +21,10 @@ module Veritas.Core.Types
 
     -- * Commitment
   , Commitment(..)
+
+    -- * Participant Registration
+  , ParticipantRegistration(..)
+  , Roster
 
     -- * Entropy
   , EntropyContribution(..)
@@ -98,7 +103,7 @@ data NonParticipationPolicy
 
 -- | The kind of random outcome to produce
 data CeremonyType
-  = CoinFlip
+  = CoinFlip Text Text          -- ^ sideA, sideB labels
   | UniformChoice (NonEmpty Text)
   | Shuffle (NonEmpty Text)
   | IntRange Int Int
@@ -122,16 +127,35 @@ data BeaconFallback
   deriving stock (Eq, Show, Generic)
   deriving anyclass (FromJSON, ToJSON)
 
+-- | Whether participants are anonymous or self-certified via Ed25519 keys
+data IdentityMode
+  = Anonymous       -- ^ Ephemeral participant IDs, no authentication
+  | SelfCertified   -- ^ Participants register Ed25519 public keys and sign commitments
+  deriving stock (Eq, Show, Generic)
+  deriving anyclass (ToSchema)
+
+instance ToJSON IdentityMode where
+  toJSON Anonymous     = "Anonymous"
+  toJSON SelfCertified = "SelfCertified"
+
+instance FromJSON IdentityMode where
+  parseJSON = \case
+    String "Anonymous"     -> pure Anonymous
+    String "SelfCertified" -> pure SelfCertified
+    _                      -> fail "Expected \"Anonymous\" or \"SelfCertified\""
+
 -- | Ceremony lifecycle phase
 data Phase
-  = Pending          -- ^ Accepting commitments
-  | AwaitingReveals  -- ^ Collecting entropy reveals (Methods A, D)
-  | AwaitingBeacon   -- ^ Waiting for external beacon value (Methods B, D)
-  | Resolving        -- ^ Computing outcome
-  | Finalized        -- ^ Outcome sealed
-  | Expired          -- ^ Commitment deadline passed without quorum
-  | Cancelled        -- ^ Aborted
-  | Disputed         -- ^ Verification failed
+  = Gathering          -- ^ Self-certified: accepting participant registrations
+  | AwaitingRosterAcks -- ^ Self-certified: waiting for roster acknowledgments
+  | Pending            -- ^ Accepting commitments
+  | AwaitingReveals    -- ^ Collecting entropy reveals (Methods A, D)
+  | AwaitingBeacon     -- ^ Waiting for external beacon value (Methods B, D)
+  | Resolving          -- ^ Computing outcome
+  | Finalized          -- ^ Outcome sealed
+  | Expired            -- ^ Commitment deadline passed without quorum
+  | Cancelled          -- ^ Aborted
+  | Disputed           -- ^ Verification failed
   deriving stock (Eq, Show, Generic)
   deriving anyclass (FromJSON, ToJSON, ToSchema)
 
@@ -147,6 +171,7 @@ data Ceremony = Ceremony
   , revealDeadline         :: Maybe UTCTime
   , nonParticipationPolicy :: Maybe NonParticipationPolicy
   , beaconSpec             :: Maybe BeaconSpec
+  , identityMode           :: IdentityMode
   , phase                  :: Phase
   , createdBy              :: ParticipantId
   , createdAt              :: UTCTime
@@ -175,6 +200,18 @@ instance FromJSON Commitment where
     <*> o .: "commitParty"
     <*> (o .: "entropySealHash" >>= mapM (parseHexField "entropySealHash"))
     <*> o .: "committedAt"
+
+-- | A participant registration in a self-certified ceremony
+data ParticipantRegistration = ParticipantRegistration
+  { prCeremony    :: CeremonyId
+  , prParticipant :: ParticipantId
+  , prPublicKey   :: ByteString      -- Ed25519 32 bytes
+  , prDisplayName :: Maybe Text
+  , prJoinedAt    :: UTCTime
+  } deriving stock (Eq, Show, Generic)
+
+-- | A roster is a sorted list of (participant_id, public_key) pairs
+type Roster = [(ParticipantId, ByteString)]
 
 -- | A contribution of entropy to a ceremony
 data EntropyContribution = EntropyContribution
@@ -289,7 +326,7 @@ instance FromJSON Outcome where
 
 -- | The actual random result
 data CeremonyResult
-  = CoinFlipResult Bool
+  = CoinFlipResult Text
   | ChoiceResult Text
   | ShuffleResult [Text]
   | IntRangeResult Int
@@ -329,6 +366,9 @@ data CeremonyEvent
   | CeremonyCancelled Text
   | CeremonyDisputed Text
   | DeadlineExtended NominalDiffTime UTCTime
+  | ParticipantJoined ParticipantId ByteString     -- ^ pid, public key
+  | RosterFinalized [(ParticipantId, ByteString)]   -- ^ locked roster
+  | RosterAcknowledged ParticipantId ByteString     -- ^ pid, signature
   deriving stock (Eq, Show, Generic)
 
 instance ToJSON CeremonyEvent where
@@ -346,6 +386,9 @@ instance ToJSON CeremonyEvent where
     CeremonyCancelled reason  -> tagged "CeremonyCancelled" ["reason" .= reason]
     CeremonyDisputed reason   -> tagged "CeremonyDisputed" ["reason" .= reason]
     DeadlineExtended dur newDl -> tagged "DeadlineExtended" ["duration" .= dur, "newDeadline" .= newDl]
+    ParticipantJoined pid pk   -> tagged "ParticipantJoined" ["participant" .= pid, "publicKey" .= hexEncode pk]
+    RosterFinalized roster     -> tagged "RosterFinalized" ["roster" .= map (\(pid, pk) -> object ["participant" .= pid, "publicKey" .= hexEncode pk]) roster]
+    RosterAcknowledged pid sig -> tagged "RosterAcknowledged" ["participant" .= pid, "signature" .= hexEncode sig]
     where
       tagged :: Text -> [Pair] -> Value
       tagged tag fields = object (("tag" .= tag) : fields)
@@ -369,6 +412,17 @@ instance FromJSON CeremonyEvent where
       "CeremonyDisputed"        -> CeremonyDisputed <$> o .: "reason"
       "DeadlineExtended"        -> DeadlineExtended <$> o .: "duration"
                                                     <*> o .: "newDeadline"
+      "ParticipantJoined"       -> ParticipantJoined <$> o .: "participant"
+                                                     <*> (o .: "publicKey" >>= parseHexField "publicKey")
+      "RosterFinalized"         -> do
+                                     entries <- o .: "roster"
+                                     roster <- mapM (\entry -> withObject "RosterEntry" (\e ->
+                                       (,) <$> e .: "participant"
+                                           <*> (e .: "publicKey" >>= parseHexField "publicKey")
+                                       ) entry) entries
+                                     pure (RosterFinalized roster)
+      "RosterAcknowledged"      -> RosterAcknowledged <$> o .: "participant"
+                                                      <*> (o .: "signature" >>= parseHexField "signature")
       _                         -> fail ("Unknown CeremonyEvent tag: " <> T.unpack tag)
 
 -- | Record of non-participation and how it was handled
@@ -415,6 +469,11 @@ data TransitionError
   | MissingRevealDeadline
   | MissingBeaconSpec
   | InvariantViolation Text
+  | AlreadyJoined ParticipantId
+  | NotJoined ParticipantId
+  | AlreadyAcknowledged ParticipantId
+  | InvalidSignature ParticipantId Text
+  | IdentityRequired
   deriving stock (Eq, Show, Generic)
 
 -- === OpenAPI schema instances for complex types ===

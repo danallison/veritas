@@ -9,14 +9,16 @@ The name reflects the core promise: the truth of the outcome is established by t
 A **ceremony** is the unit of social randomness — a complete lifecycle from creation through commitment, entropy collection, resolution, and finalization.
 
 ```
-Pending → AwaitingReveals → AwaitingBeacon → Resolving → Finalized
+Anonymous:       Pending → AwaitingReveals → AwaitingBeacon → Resolving → Finalized
+Self-Certified:  Gathering → AwaitingRosterAcks → Pending → ...same
 ```
 
-1. **Creation** — Define parameters: type of random event, number of parties, deadline
-2. **Commitment** — Parties join and cryptographically commit to accepting the outcome *before* any randomness is visible
-3. **Entropy Collection** — Randomness inputs are gathered via one of four strategies
-4. **Resolution** — The outcome is computed deterministically from collected entropy
-5. **Finalization** — The outcome, commitments, and entropy are sealed into a tamper-evident audit log
+1. **Creation** — Define parameters: type of random event, number of parties, identity mode, deadline
+2. **Registration** (self-certified only) — Parties register Ed25519 public keys, then sign the roster to prove mutual awareness
+3. **Commitment** — Parties cryptographically commit to accepting the outcome *before* any randomness is visible (self-certified: commitments are signed)
+4. **Entropy Collection** — Randomness inputs are gathered via one of four strategies
+5. **Resolution** — The outcome is computed deterministically from collected entropy
+6. **Finalization** — The outcome, commitments, and entropy are sealed into a tamper-evident audit log
 
 ### Entropy Strategies
 
@@ -27,18 +29,30 @@ Pending → AwaitingReveals → AwaitingBeacon → Resolving → Finalized
 | **Combined** | Participant entropy XOR'd with beacon | Best of both (recommended) |
 | **OfficiantVRF** | Server-generated VRF randomness | Requires server trust, lowest friction |
 
+### Participant Identity
+
+Ceremonies support two identity modes, chosen at creation:
+
+| Mode | Registration | Non-Repudiation | Best For |
+|------|-------------|-----------------|----------|
+| **Anonymous** | UUID only | Token-based (weak) | Casual ceremonies, mutual trust |
+| **Self-Certified** | Ed25519 keypair + roster signing | Cryptographic (strong) | AI agents, high-stakes, formal agreements |
+
+Self-certified ceremonies add a registration and roster acknowledgment phase before commitments begin. Each participant registers a public key, signs the full roster (proving they saw who else is participating), and signs their commitment. The ceremony record contains three layers of cryptographic evidence per participant — denying involvement requires claiming private key compromise.
+
 ### Critical Invariants
 
 - No entropy is visible before all commitments are collected
 - Outcome derivation is deterministic — same entropy always produces the same result
 - Audit log entries are hash-chained — any tampering is detectable
 - Commitments are cryptographically binding
+- Self-certified identity is non-repudiable — public key, roster signature, and signed commitment are all recorded in the tamper-evident hash chain
 
 ## Tech Stack
 
 - **Backend:** Haskell (GHC 9.6), Servant, PostgreSQL, crypton, katip
 - **Frontend:** React 19, TypeScript, Vite, Tailwind CSS, React Router v7
-- **Crypto:** SHA-256, Ed25519, BLS12-381 (drand verification), HKDF
+- **Crypto:** SHA-256, Ed25519 (server signing + participant identity), BLS12-381 (drand verification), HKDF
 - **Testing:** hspec, QuickCheck, Vitest
 - **Infrastructure:** Docker Compose
 
@@ -62,7 +76,7 @@ There is no local Haskell tooling required — all Haskell build and test comman
 # Build
 docker compose run --rm --entrypoint cabal dev build
 
-# Run tests (215 tests: unit, property-based, statistical)
+# Run tests (255 tests: unit, property-based, statistical)
 docker compose run --rm --entrypoint cabal dev test
 
 # Run a specific test module
@@ -83,7 +97,7 @@ npm install
 # Type check
 npx tsc --noEmit
 
-# Run tests (66 tests)
+# Run tests (105 tests)
 npx vitest run
 
 # Dev server (also available via docker compose)
@@ -110,7 +124,7 @@ veritas/
 │   ├── components/               # UI components (PhaseIndicator, OutcomeDisplay, AuditLog, ...)
 │   ├── hooks/                    # Custom hooks (useCeremony, useCeremonySecrets, useParticipant)
 │   ├── pages/                    # Route pages
-│   └── crypto/                   # Client-side entropy generation
+│   └── crypto/                   # Client-side entropy generation + Ed25519 identity
 ├── docker-compose.yml
 ├── Dockerfile                    # Development build
 ├── Dockerfile.prod               # Production multi-stage build
@@ -129,6 +143,9 @@ The backend serves a REST API with OpenAPI 3.0 documentation at `GET /docs`.
 | `POST` | `/ceremonies` | Create a new ceremony |
 | `GET` | `/ceremonies/:id` | Get ceremony status |
 | `GET` | `/ceremonies` | List ceremonies (optional `?phase=` filter) |
+| `POST` | `/ceremonies/:id/join` | Register a public key (self-certified) |
+| `POST` | `/ceremonies/:id/ack-roster` | Sign the roster (self-certified) |
+| `GET` | `/ceremonies/:id/roster` | Get the participant roster |
 | `POST` | `/ceremonies/:id/commit` | Submit a commitment |
 | `POST` | `/ceremonies/:id/reveal` | Reveal entropy |
 | `GET` | `/ceremonies/:id/outcome` | Get the resolved outcome |

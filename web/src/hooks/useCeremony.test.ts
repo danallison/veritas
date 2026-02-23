@@ -17,7 +17,7 @@ function makeCeremony(overrides: Partial<CeremonyResponse> = {}): CeremonyRespon
   return {
     id: 'test-id',
     question: 'Who goes first?',
-    ceremony_type: { tag: 'CoinFlip' },
+    ceremony_type: { tag: 'CoinFlip', contents: ['Heads', 'Tails'] },
     entropy_method: 'OfficiantVRF',
     required_parties: 2,
     commitment_mode: 'Immediate',
@@ -30,6 +30,8 @@ function makeCeremony(overrides: Partial<CeremonyResponse> = {}): CeremonyRespon
     created_at: '2026-01-01T00:00:00Z',
     commitment_count: 0,
     committed_participants: [],
+    roster: null,
+    params_hash: 'abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234',
     ...overrides,
   }
 }

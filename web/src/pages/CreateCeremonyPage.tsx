@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import { useParticipant } from '../hooks/useParticipant'
-import type { EntropyMethod, CommitmentMode, NonParticipationPolicy, CeremonyType, BeaconSpec } from '../api/types'
+import type { EntropyMethod, CommitmentMode, NonParticipationPolicy, CeremonyType, BeaconSpec, IdentityMode } from '../api/types'
 
 export default function CreateCeremonyPage() {
   const navigate = useNavigate()
@@ -12,6 +12,8 @@ export default function CreateCeremonyPage() {
 
   const [question, setQuestion] = useState('')
   const [typeKind, setTypeKind] = useState<string>('CoinFlip')
+  const [coinLabelA, setCoinLabelA] = useState('Heads')
+  const [coinLabelB, setCoinLabelB] = useState('Tails')
   const [choices, setChoices] = useState('Option A, Option B')
   const [intMin, setIntMin] = useState(1)
   const [intMax, setIntMax] = useState(100)
@@ -21,6 +23,7 @@ export default function CreateCeremonyPage() {
   const [deadlineMinutes, setDeadlineMinutes] = useState(60)
   const [revealMinutes, setRevealMinutes] = useState(30)
   const [nonPartPolicy, setNonPartPolicy] = useState<NonParticipationPolicy>('Exclusion')
+  const [identityMode, setIdentityMode] = useState<IdentityMode>('Anonymous')
   const [beaconNetwork, setBeaconNetwork] = useState('default')
 
   const needsRevealParams = method === 'ParticipantReveal' || method === 'Combined'
@@ -28,14 +31,14 @@ export default function CreateCeremonyPage() {
 
   const buildCeremonyType = (): CeremonyType => {
     switch (typeKind) {
-      case 'CoinFlip': return { tag: 'CoinFlip' }
+      case 'CoinFlip': return { tag: 'CoinFlip', contents: [coinLabelA || 'Heads', coinLabelB || 'Tails'] }
       case 'UniformChoice':
         return { tag: 'UniformChoice', contents: choices.split(',').map(s => s.trim()).filter(Boolean) }
       case 'Shuffle':
         return { tag: 'Shuffle', contents: choices.split(',').map(s => s.trim()).filter(Boolean) }
       case 'IntRange':
         return { tag: 'IntRange', contents: [intMin, intMax] }
-      default: return { tag: 'CoinFlip' }
+      default: return { tag: 'CoinFlip', contents: [coinLabelA || 'Heads', coinLabelB || 'Tails'] }
     }
   }
 
@@ -65,6 +68,7 @@ export default function CreateCeremonyPage() {
         non_participation_policy: needsRevealParams ? nonPartPolicy : undefined,
         beacon_spec: beaconSpec,
         created_by: participantId,
+        identity_mode: identityMode !== 'Anonymous' ? identityMode : undefined,
       })
       navigate(`/ceremonies/${ceremony.id}`)
     } catch (e) {
@@ -98,6 +102,17 @@ export default function CreateCeremonyPage() {
           </select>
         </Field>
 
+        {typeKind === 'CoinFlip' && (
+          <div className="flex gap-4">
+            <Field label="Side A label">
+              <input type="text" value={coinLabelA} onChange={(e) => setCoinLabelA(e.target.value)} placeholder="Heads" className="input" />
+            </Field>
+            <Field label="Side B label">
+              <input type="text" value={coinLabelB} onChange={(e) => setCoinLabelB(e.target.value)} placeholder="Tails" className="input" />
+            </Field>
+          </div>
+        )}
+
         {(typeKind === 'UniformChoice' || typeKind === 'Shuffle') && (
           <Field label="Choices (comma-separated)">
             <input type="text" value={choices} onChange={(e) => setChoices(e.target.value)} className="input" />
@@ -121,6 +136,13 @@ export default function CreateCeremonyPage() {
             <option value="ExternalBeacon">External Beacon (drand)</option>
             <option value="ParticipantReveal">Participant Reveal (highest trust)</option>
             <option value="Combined">Combined (recommended)</option>
+          </select>
+        </Field>
+
+        <Field label="Identity mode">
+          <select value={identityMode} onChange={(e) => setIdentityMode(e.target.value as IdentityMode)} className="input">
+            <option value="Anonymous">Anonymous (default)</option>
+            <option value="SelfCertified">Self-Certified (cryptographic identity)</option>
           </select>
         </Field>
 

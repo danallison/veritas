@@ -1,9 +1,12 @@
-import type { Phase } from '../api/types'
+import type { IdentityMode, Phase } from '../api/types'
 
-const PHASES: Phase[] = ['Pending', 'AwaitingReveals', 'Resolving', 'Finalized']
+const ANON_PHASES: Phase[] = ['Pending', 'AwaitingReveals', 'Resolving', 'Finalized']
+const SELF_CERT_PHASES: Phase[] = ['Gathering', 'AwaitingRosterAcks', 'Pending', 'AwaitingReveals', 'Resolving', 'Finalized']
 const TERMINAL: Phase[] = ['Expired', 'Cancelled', 'Disputed']
 
 const LABELS: Record<Phase, string> = {
+  Gathering: 'Gathering',
+  AwaitingRosterAcks: 'Roster',
   Pending: 'Commitments',
   AwaitingReveals: 'Reveals',
   AwaitingBeacon: 'Beacon',
@@ -14,7 +17,13 @@ const LABELS: Record<Phase, string> = {
   Disputed: 'Disputed',
 }
 
-export default function PhaseIndicator({ phase }: { phase: Phase }) {
+export default function PhaseIndicator({
+  phase,
+  identityMode = 'Anonymous',
+}: {
+  phase: Phase
+  identityMode?: IdentityMode
+}) {
   if (TERMINAL.includes(phase)) {
     return (
       <span className="inline-block px-3 py-1 rounded-full text-sm font-medium bg-red-100 text-red-700">
@@ -23,11 +32,15 @@ export default function PhaseIndicator({ phase }: { phase: Phase }) {
     )
   }
 
-  const currentIdx = PHASES.indexOf(phase === 'AwaitingBeacon' ? 'AwaitingReveals' : phase)
+  const phases = identityMode === 'SelfCertified' ? SELF_CERT_PHASES : ANON_PHASES
+
+  // Map AwaitingBeacon to the same step as AwaitingReveals
+  const lookupPhase = phase === 'AwaitingBeacon' ? 'AwaitingReveals' : phase
+  const currentIdx = phases.indexOf(lookupPhase)
 
   return (
     <div className="flex items-center gap-1">
-      {PHASES.map((p, i) => {
+      {phases.map((p, i) => {
         const done = i < currentIdx
         const active = i === currentIdx
         return (
@@ -43,7 +56,7 @@ export default function PhaseIndicator({ phase }: { phase: Phase }) {
             >
               {i + 1}
             </div>
-            {i < PHASES.length - 1 && (
+            {i < phases.length - 1 && (
               <div className={`w-6 h-0.5 ${done ? 'bg-indigo-600' : 'bg-gray-200'}`} />
             )}
           </div>

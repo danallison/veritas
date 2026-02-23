@@ -96,7 +96,7 @@ spec = do
     describe "resolve" $ do
       it "produces a complete outcome for CoinFlip" $ do
         let contributions = [mkContribution "test"]
-            outcome = resolve CoinFlip contributions
+            outcome = resolve (CoinFlip "Heads" "Tails") contributions
         case outcomeValue outcome of
           CoinFlipResult _ -> pure ()
           other -> expectationFailure $ "Expected CoinFlipResult, got: " ++ show other

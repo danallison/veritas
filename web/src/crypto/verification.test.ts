@@ -75,8 +75,11 @@ describe('Cross-language verification (Haskell test vectors)', () => {
 
   describe('CoinFlip derivation', () => {
     it('matches Haskell result', async () => {
-      const result = await deriveCoinFlip(vectors.coinFlip.entropy)
-      expect(result).toBe(vectors.coinFlip.result)
+      const labels: [string, string] = ['Heads', 'Tails']
+      const result = await deriveCoinFlip(vectors.coinFlip.entropy, labels)
+      // vectors.coinFlip.result is the raw boolean; map to label
+      const expected = vectors.coinFlip.result ? 'Heads' : 'Tails'
+      expect(result).toBe(expected)
     })
   })
 
@@ -140,8 +143,11 @@ describe('Cross-language verification (Haskell test vectors)', () => {
       const combined = await combineEntropy(reversed)
       expect(combined).toBe(vectors.fullPipeline.combined_entropy)
 
-      const coinResult = await deriveCoinFlip(combined)
-      expect(coinResult).toBe(vectors.fullPipeline.coin_flip_result)
+      const labels: [string, string] = ['Heads', 'Tails']
+      const coinResult = await deriveCoinFlip(combined, labels)
+      // vectors.fullPipeline.coin_flip_result is raw boolean; map to label
+      const expected = vectors.fullPipeline.coin_flip_result ? 'Heads' : 'Tails'
+      expect(coinResult).toBe(expected)
     })
   })
 
@@ -179,11 +185,13 @@ describe('Cross-language verification (Haskell test vectors)', () => {
         }),
       )
 
+      const labels: [string, string] = ['Heads', 'Tails']
+      const expectedLabel = vectors.fullPipeline.coin_flip_result ? 'Heads' : 'Tails'
       const result = await verifyOutcome(
-        { tag: 'CoinFlip' },
+        { tag: 'CoinFlip', contents: labels },
         inputs,
         vectors.fullPipeline.combined_entropy,
-        vectors.fullPipeline.coin_flip_result,
+        expectedLabel,
       )
 
       expect(result.combinedEntropyMatch).toBe(true)
@@ -303,10 +311,10 @@ describe('Cross-language verification (Haskell test vectors)', () => {
       )
 
       const result = await verifyOutcome(
-        { tag: 'CoinFlip' },
+        { tag: 'CoinFlip', contents: ['Heads', 'Tails'] },
         inputs,
         'deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
-        vectors.fullPipeline.coin_flip_result,
+        vectors.fullPipeline.coin_flip_result ? 'Heads' : 'Tails',
       )
 
       expect(result.combinedEntropyMatch).toBe(false)

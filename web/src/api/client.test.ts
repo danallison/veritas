@@ -62,7 +62,7 @@ describe('API client request function', () => {
 
     const reqBody = {
       question: 'Who goes first?',
-      ceremony_type: { tag: 'CoinFlip' as const },
+      ceremony_type: { tag: 'CoinFlip' as const, contents: ['Heads', 'Tails'] as [string, string] },
       entropy_method: 'ParticipantReveal' as const,
       required_parties: 2,
       commitment_mode: 'Immediate' as const,

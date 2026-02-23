@@ -31,24 +31,24 @@ function makeOutcome(outcome: unknown) {
 describe('OutcomeDisplay', () => {
   it('shows loading state before fetch resolves', () => {
     mockGetOutcome.mockReturnValue(new Promise(() => {})) // never resolves
-    render(<OutcomeDisplay ceremonyId="c1" ceremonyType={{ tag: 'CoinFlip' }} />)
+    render(<OutcomeDisplay ceremonyId="c1" ceremonyType={{ tag: 'CoinFlip', contents: ['Heads', 'Tails'] }} />)
     expect(screen.getByText('Loading outcome...')).toBeDefined()
   })
 
-  it('renders "Heads" for CoinFlipResult true', async () => {
+  it('renders the winning label for CoinFlipResult', async () => {
     mockGetOutcome.mockResolvedValue(
-      makeOutcome({ tag: 'CoinFlipResult', contents: true })
+      makeOutcome({ tag: 'CoinFlipResult', contents: 'Heads' })
     )
-    render(<OutcomeDisplay ceremonyId="c1" ceremonyType={{ tag: 'CoinFlip' }} />)
+    render(<OutcomeDisplay ceremonyId="c1" ceremonyType={{ tag: 'CoinFlip', contents: ['Heads', 'Tails'] }} />)
     await waitFor(() => expect(screen.getByText('Heads')).toBeDefined())
   })
 
-  it('renders "Tails" for CoinFlipResult false', async () => {
+  it('renders custom label for CoinFlipResult', async () => {
     mockGetOutcome.mockResolvedValue(
-      makeOutcome({ tag: 'CoinFlipResult', contents: false })
+      makeOutcome({ tag: 'CoinFlipResult', contents: 'Alice wins' })
     )
-    render(<OutcomeDisplay ceremonyId="c1" ceremonyType={{ tag: 'CoinFlip' }} />)
-    await waitFor(() => expect(screen.getByText('Tails')).toBeDefined())
+    render(<OutcomeDisplay ceremonyId="c1" ceremonyType={{ tag: 'CoinFlip', contents: ['Alice wins', 'Bob wins'] }} />)
+    await waitFor(() => expect(screen.getByText('Alice wins')).toBeDefined())
   })
 
   it('renders chosen item for ChoiceResult', async () => {
@@ -93,7 +93,7 @@ describe('OutcomeDisplay', () => {
 
   it('shows error state when fetch fails', async () => {
     mockGetOutcome.mockRejectedValue(new Error('Network error'))
-    render(<OutcomeDisplay ceremonyId="c1" ceremonyType={{ tag: 'CoinFlip' }} />)
+    render(<OutcomeDisplay ceremonyId="c1" ceremonyType={{ tag: 'CoinFlip', contents: ['Heads', 'Tails'] }} />)
     await waitFor(() => expect(screen.getByText('Network error')).toBeDefined())
   })
 })

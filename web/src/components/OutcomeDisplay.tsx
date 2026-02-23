@@ -45,7 +45,7 @@ function renderResult(
     case 'CoinFlipResult':
       return (
         <p className="text-3xl font-bold text-center py-4">
-          {contents ? 'Heads' : 'Tails'}
+          {String(contents)}
         </p>
       )
     case 'ChoiceResult':
