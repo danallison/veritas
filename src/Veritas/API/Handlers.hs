@@ -3,6 +3,8 @@ module Veritas.API.Handlers
   ( server
   , fullServer
   , AppEnv(..)
+  , validateCeremonyType
+  , validateRequest
   , validateTwoPartySafety
   , validateMethodParams
   , validateBeaconSpec
@@ -15,7 +17,8 @@ import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BS8
 import qualified Data.ByteString.Lazy as LBS
-import Data.List (find)
+import Data.List (find, nub)
+import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -89,6 +92,16 @@ docsHandler = pure $ toOpenApi api
 
 createCeremony :: AppEnv -> CreateCeremonyRequest -> Handler CeremonyResponse
 createCeremony AppEnv{..} req = do
+  -- Basic request validation
+  case validateRequest (crqQuestion req) (crqRequiredParties req) of
+    Left msg -> throwError err400 { errBody = LBS.fromStrict (TE.encodeUtf8 msg) }
+    Right () -> pure ()
+
+  -- Ceremony type validation
+  case validateCeremonyType (crqCeremonyType req) of
+    Left msg -> throwError err400 { errBody = LBS.fromStrict (TE.encodeUtf8 msg) }
+    Right () -> pure ()
+
   -- Method-specific parameter validation (protocol Section 3)
   case validateMethodParams (crqEntropyMethod req) (crqRevealDeadline req) (crqNonParticipationPolicy req) of
     Left msg -> throwError err400 { errBody = LBS.fromStrict (TE.encodeUtf8 msg) }
@@ -142,6 +155,52 @@ createCeremony AppEnv{..} req = do
     runKatipT envLogEnv $
       logMsg "api.ceremony" InfoS (ls ("Ceremony created: " <> UUID.toText cid))
   pure $ ceremonyToResponse ceremony 0 [] Nothing
+
+-- | Validate top-level request fields (question, required_parties).
+validateRequest :: Text -> Natural -> Either Text ()
+validateRequest question parties = do
+  when (T.null (T.strip question)) $
+    Left "question must not be empty"
+  when (parties < 1) $
+    Left "required_parties must be at least 1"
+
+-- | Validate ceremony type parameters.
+validateCeremonyType :: CeremonyType -> Either Text ()
+validateCeremonyType (CoinFlip a b) = do
+  when (T.null a) $ Left "CoinFlip: side A label must not be empty"
+  when (T.null b) $ Left "CoinFlip: side B label must not be empty"
+  when (a == b) $ Left "CoinFlip: labels must be distinct"
+validateCeremonyType (UniformChoice choices) = do
+  let xs = NE.toList choices
+  when (any T.null xs) $
+    Left "UniformChoice: all choice labels must be non-empty"
+  when (length xs < 2) $
+    Left "UniformChoice: must have at least 2 choices"
+  when (nub xs /= xs) $
+    Left "UniformChoice: all choice labels must be distinct"
+validateCeremonyType (Shuffle items) = do
+  let xs = NE.toList items
+  when (any T.null xs) $
+    Left "Shuffle: all item labels must be non-empty"
+  when (length xs < 2) $
+    Left "Shuffle: must have at least 2 items"
+validateCeremonyType (IntRange lo hi) =
+  when (lo > hi) $
+    Left "IntRange: lo must be less than or equal to hi"
+validateCeremonyType (WeightedChoice choices) = do
+  let xs = NE.toList choices
+      labels = fmap fst xs
+      weights = fmap snd choices
+  when (any T.null labels) $
+    Left "WeightedChoice: all choice labels must be non-empty"
+  when (length xs < 2) $
+    Left "WeightedChoice: must have at least 2 choices"
+  when (nub labels /= labels) $
+    Left "WeightedChoice: all choice labels must be distinct"
+  when (any (<= 0) weights) $
+    Left "WeightedChoice: all weights must be positive"
+  when (sum weights /= 1) $
+    Left "WeightedChoice: weights must sum to 1"
 
 -- | Reject DefaultSubstitution for 2-party ceremonies.
 -- With only 2 parties, if one doesn't reveal, the remaining party knows both

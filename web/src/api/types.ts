@@ -29,6 +29,34 @@ export type Phase =
   | 'Cancelled'
   | 'Disputed'
 
+// --- Rational (Haskell's Data.Ratio.Rational, serialized by aeson) ---
+
+export interface Rational {
+  numerator: number
+  denominator: number
+}
+
+export function rationalToNumber(r: Rational): number {
+  return r.numerator / r.denominator
+}
+
+export function numberToRational(n: number): Rational {
+  if (Number.isInteger(n)) return { numerator: n, denominator: 1 }
+  const str = String(n)
+  const dotIndex = str.indexOf('.')
+  if (dotIndex === -1) return { numerator: n, denominator: 1 }
+  const fracPart = str.slice(dotIndex + 1)
+  const denominator = 10 ** fracPart.length
+  const numerator = parseInt(str.replace('.', ''), 10)
+  const g = gcd(Math.abs(numerator), denominator)
+  return { numerator: numerator / g, denominator: denominator / g }
+}
+
+function gcd(a: number, b: number): number {
+  while (b !== 0) { [a, b] = [b, a % b] }
+  return a
+}
+
 // --- CeremonyType (generic deriving with tagged constructors) ---
 
 export type CeremonyType =
@@ -36,7 +64,7 @@ export type CeremonyType =
   | { tag: 'UniformChoice'; contents: string[] }
   | { tag: 'Shuffle'; contents: string[] }
   | { tag: 'IntRange'; contents: [number, number] }
-  | { tag: 'WeightedChoice'; contents: [string, number][] }
+  | { tag: 'WeightedChoice'; contents: [string, Rational][] }
 
 // --- BeaconSpec ---
 

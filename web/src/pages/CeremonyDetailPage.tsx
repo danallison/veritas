@@ -9,6 +9,7 @@ import RevealForm from '../components/RevealForm'
 import OutcomeDisplay from '../components/OutcomeDisplay'
 import AuditLog from '../components/AuditLog'
 import VerificationData from '../components/VerificationData'
+import { rationalToNumber } from '../api/types'
 import type { EntropyMethod, CeremonyType } from '../api/types'
 
 function formatCeremonyType(ct: CeremonyType): string {
@@ -22,7 +23,7 @@ function formatCeremonyType(ct: CeremonyType): string {
     case 'IntRange':
       return `Integer Range: ${ct.contents[0]} to ${ct.contents[1]}`
     case 'WeightedChoice':
-      return `Weighted Choice: ${ct.contents.map(([label, weight]) => `${label} (${weight})`).join(', ')}`
+      return `Weighted Choice: ${ct.contents.map(([label, weight]) => `${label} (${rationalToNumber(weight)})`).join(', ')}`
   }
 }
 

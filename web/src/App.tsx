@@ -16,6 +16,7 @@ export default function App() {
         <Route path="/ceremonies/:id" element={<CeremonyDetailPage />} />
         <Route path="/random" element={<RandomToolsPage />} />
         <Route path="/verify" element={<VerificationGuidePage />} />
+        <Route path="/verify/:ceremonyId" element={<VerificationGuidePage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Routes>

@@ -347,7 +347,7 @@ export default function VerificationData({
 
       <p className="text-xs text-gray-500">
         To independently reproduce this outcome, follow the{' '}
-        <Link to="/verify" className="text-indigo-600 hover:underline">
+        <Link to={`/verify/${ceremonyId}`} className="text-indigo-600 hover:underline">
           step-by-step verification guide
         </Link>.
       </p>

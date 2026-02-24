@@ -1,4 +1,5 @@
 import { bytesToHex, hexToBytes } from './entropy'
+import { rationalToNumber } from '../api/types'
 import type { CeremonyResponse, CeremonyType } from '../api/types'
 
 const STORAGE_PREFIX = 'veritas_pubkey_'
@@ -83,7 +84,7 @@ function describeCeremonyType(ct: CeremonyType): string {
     case 'IntRange':
       return `Integer Range: ${ct.contents[0]} to ${ct.contents[1]}`
     case 'WeightedChoice':
-      return `Weighted Choice: ${ct.contents.map(([label, weight]) => `${label} (${weight})`).join(', ')}`
+      return `Weighted Choice: ${ct.contents.map(([label, weight]) => `${label} (${rationalToNumber(weight)})`).join(', ')}`
   }
 }
 

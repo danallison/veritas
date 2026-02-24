@@ -10,6 +10,8 @@
  */
 
 import { hexToBytes, bytesToHex } from './entropy'
+import { rationalToNumber } from '../api/types'
+import type { Rational } from '../api/types'
 
 const TWO_TO_256 = 2n ** 256n
 const SALT = new TextEncoder().encode('veritas-salt')
@@ -215,7 +217,7 @@ export async function verifyOutcome(
     case 'WeightedChoice':
       computedOutcome = await deriveWeightedChoice(
         computedCombinedEntropy,
-        ceremonyType.contents as [string, number][],
+        (ceremonyType.contents as [string, Rational][]).map(([label, r]) => [label, rationalToNumber(r)]),
       )
       break
     case 'Shuffle':

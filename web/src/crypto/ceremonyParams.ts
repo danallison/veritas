@@ -65,7 +65,7 @@ function ceremonyTypeBytes(ct: CeremonyType): Uint8Array {
       return concat([
         lpString('WeightedChoice'),
         u32be(ct.contents.length),
-        ...ct.contents.flatMap(([label, weight]) => [lpString(label), lpString(numberToRationalShow(weight))]),
+        ...ct.contents.flatMap(([label, weight]) => [lpString(label), lpString(`${weight.numerator} % ${weight.denominator}`)]),
       ])
   }
 }
@@ -88,35 +88,6 @@ function beaconFallbackBytes(fb: BeaconFallback): Uint8Array {
     case 'CancelCeremony':
       return new Uint8Array([0x03])
   }
-}
-
-/**
- * Convert a JS number to Haskell's `show` format for Rational ("n % d").
- *
- * Haskell's `show (3 % 2 :: Rational)` produces `"3 % 2"`.
- * Aeson encodes Rational as a JSON number, so we convert back.
- */
-function numberToRationalShow(n: number): string {
-  if (Number.isInteger(n)) {
-    return `${n} % 1`
-  }
-  const str = String(n)
-  const dotIndex = str.indexOf('.')
-  if (dotIndex === -1) {
-    return `${n} % 1`
-  }
-  const fracPart = str.slice(dotIndex + 1)
-  const denominator = 10 ** fracPart.length
-  const numerator = parseInt(str.replace('.', ''), 10)
-  const g = gcd(Math.abs(numerator), denominator)
-  return `${numerator / g} % ${denominator / g}`
-}
-
-function gcd(a: number, b: number): number {
-  while (b !== 0) {
-    ;[a, b] = [b, a % b]
-  }
-  return a
 }
 
 // --- Main serialization ---

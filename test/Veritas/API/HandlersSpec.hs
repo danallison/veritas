@@ -5,7 +5,8 @@ import Data.Time.Clock.POSIX (posixSecondsToUTCTime)
 import Test.Hspec
 
 import Veritas.Core.Types
-import Veritas.API.Handlers (validateMethodParams, validateTwoPartySafety, validateBeaconSpec, validateTemporalConstraints)
+import Data.List.NonEmpty (NonEmpty(..))
+import Veritas.API.Handlers (validateCeremonyType, validateRequest, validateMethodParams, validateTwoPartySafety, validateBeaconSpec, validateTemporalConstraints)
 
 -- Helper: a fixed UTCTime for tests that need a deadline
 someTime :: UTCTime
@@ -20,6 +21,117 @@ someBeaconSpec = BeaconSpec
 
 spec :: Spec
 spec = do
+  describe "validateRequest" $ do
+    it "accepts a valid question and parties" $
+      validateRequest "Who goes first?" 2
+        `shouldBe` Right ()
+
+    it "rejects an empty question" $
+      validateRequest "" 2
+        `shouldSatisfy` isLeft
+
+    it "rejects a whitespace-only question" $
+      validateRequest "   " 2
+        `shouldSatisfy` isLeft
+
+    it "rejects zero required_parties" $
+      validateRequest "Who goes first?" 0
+        `shouldSatisfy` isLeft
+
+    it "accepts 1 required_parties" $
+      validateRequest "Who goes first?" 1
+        `shouldBe` Right ()
+
+  describe "validateCeremonyType" $ do
+    -- CoinFlip
+    it "accepts a valid CoinFlip" $
+      validateCeremonyType (CoinFlip "Heads" "Tails")
+        `shouldBe` Right ()
+
+    it "rejects CoinFlip with empty side A" $
+      validateCeremonyType (CoinFlip "" "Tails")
+        `shouldSatisfy` isLeft
+
+    it "rejects CoinFlip with empty side B" $
+      validateCeremonyType (CoinFlip "Heads" "")
+        `shouldSatisfy` isLeft
+
+    it "rejects CoinFlip with duplicate labels" $
+      validateCeremonyType (CoinFlip "Heads" "Heads")
+        `shouldSatisfy` isLeft
+
+    -- UniformChoice
+    it "accepts a valid UniformChoice" $
+      validateCeremonyType (UniformChoice ("A" :| ["B", "C"]))
+        `shouldBe` Right ()
+
+    it "rejects UniformChoice with an empty label" $
+      validateCeremonyType (UniformChoice ("A" :| ["", "C"]))
+        `shouldSatisfy` isLeft
+
+    it "rejects UniformChoice with only 1 choice" $
+      validateCeremonyType (UniformChoice ("A" :| []))
+        `shouldSatisfy` isLeft
+
+    it "rejects UniformChoice with duplicate labels" $
+      validateCeremonyType (UniformChoice ("A" :| ["B", "A"]))
+        `shouldSatisfy` isLeft
+
+    -- IntRange
+    it "accepts a valid IntRange" $
+      validateCeremonyType (IntRange 1 10)
+        `shouldBe` Right ()
+
+    it "accepts IntRange where lo == hi" $
+      validateCeremonyType (IntRange 5 5)
+        `shouldBe` Right ()
+
+    it "rejects IntRange where lo > hi" $
+      validateCeremonyType (IntRange 10 1)
+        `shouldSatisfy` isLeft
+
+    -- Shuffle
+    it "accepts a valid Shuffle" $
+      validateCeremonyType (Shuffle ("X" :| ["Y", "Z"]))
+        `shouldBe` Right ()
+
+    it "rejects Shuffle with an empty label" $
+      validateCeremonyType (Shuffle ("X" :| [""]))
+        `shouldSatisfy` isLeft
+
+    it "rejects Shuffle with only 1 item" $
+      validateCeremonyType (Shuffle ("X" :| []))
+        `shouldSatisfy` isLeft
+
+    -- WeightedChoice
+    it "accepts WeightedChoice with weights summing to 1" $
+      validateCeremonyType (WeightedChoice (("A", 1/2) :| [("B", 1/3), ("C", 1/6)]))
+        `shouldBe` Right ()
+
+    it "rejects WeightedChoice with weights not summing to 1" $
+      validateCeremonyType (WeightedChoice (("A", 1/2) :| [("B", 1/4)]))
+        `shouldSatisfy` isLeft
+
+    it "rejects WeightedChoice with a zero weight" $
+      validateCeremonyType (WeightedChoice (("A", 1) :| [("B", 0)]))
+        `shouldSatisfy` isLeft
+
+    it "rejects WeightedChoice with a negative weight" $
+      validateCeremonyType (WeightedChoice (("A", 3/2) :| [("B", -1/2)]))
+        `shouldSatisfy` isLeft
+
+    it "rejects WeightedChoice with an empty label" $
+      validateCeremonyType (WeightedChoice (("", 1/2) :| [("B", 1/2)]))
+        `shouldSatisfy` isLeft
+
+    it "rejects WeightedChoice with only 1 choice" $
+      validateCeremonyType (WeightedChoice (("A", 1) :| []))
+        `shouldSatisfy` isLeft
+
+    it "rejects WeightedChoice with duplicate labels" $
+      validateCeremonyType (WeightedChoice (("A", 1/2) :| [("A", 1/2)]))
+        `shouldSatisfy` isLeft
+
   describe "validateMethodParams" $ do
     -- ParticipantReveal requires both reveal_deadline and non_participation_policy
     it "accepts ParticipantReveal with both reveal_deadline and policy" $

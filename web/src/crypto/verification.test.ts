@@ -246,8 +246,8 @@ describe('Cross-language verification (Haskell test vectors)', () => {
           valueHex: c.value,
         }),
       )
-      const choices: [string, number][] = vectors.weightedChoice.choices.map(
-        (c) => [c.label, c.weight],
+      const choices = vectors.weightedChoice.choices.map(
+        (c) => [c.label, { numerator: c.weight, denominator: 1 }] as [string, { numerator: number; denominator: number }],
       )
 
       const result = await verifyOutcome(
