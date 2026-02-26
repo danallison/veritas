@@ -86,6 +86,16 @@ library
     Veritas.Config
     Veritas.Logging
     Veritas.API.RateLimit
+    Veritas.Pool.Types
+    Veritas.Pool.Seal
+    Veritas.Pool.Selection
+    Veritas.Pool.Comparison
+    Veritas.Pool.StateMachine
+    Veritas.DB.PoolMigrations
+    Veritas.DB.PoolQueries
+    Veritas.API.PoolTypes
+    Veritas.API.PoolHandlers
+    Veritas.Workers.ValidatorSelector
 
 executable veritas
   import:           common-deps
@@ -144,6 +154,10 @@ test-suite veritas-tests
     Integration.ErrorSpec
     Integration.AuditLogSpec
     Integration.StandaloneSpec
+    Veritas.Pool.SealSpec
+    Veritas.Pool.SelectionSpec
+    Veritas.Pool.ComparisonSpec
+    Veritas.Pool.StateMachineSpec
   ghc-options:
     -threaded
     -rtsopts

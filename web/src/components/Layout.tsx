@@ -7,6 +7,7 @@ export default function Layout() {
         <Link to="/" className="text-lg font-bold text-indigo-600">Veritas</Link>
         <Link to="/create" className="text-sm text-gray-600 hover:text-gray-900">Create Ceremony</Link>
         <Link to="/random" className="text-sm text-gray-600 hover:text-gray-900">Random Tools</Link>
+        <Link to="/pools/demo" className="text-sm text-gray-600 hover:text-gray-900">Pool Demo</Link>
         <Link to="/verify" className="text-sm text-gray-600 hover:text-gray-900">Verify</Link>
       </nav>
       <main className="max-w-3xl mx-auto px-4 py-8">

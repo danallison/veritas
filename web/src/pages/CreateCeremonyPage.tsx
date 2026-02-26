@@ -136,6 +136,7 @@ export default function CreateCeremonyPage() {
     <div>
       <h1 className="text-2xl font-bold mb-6">Create Ceremony</h1>
 
+      <div className="bg-white rounded-lg border border-gray-200 p-6">
       <form onSubmit={handleSubmit} className="space-y-5">
         <Field label="Question">
           <input
@@ -303,6 +304,7 @@ export default function CreateCeremonyPage() {
           {loading ? 'Creating...' : 'Create Ceremony'}
         </button>
       </form>
+      </div>
     </div>
   )
 }

@@ -5,6 +5,7 @@ import CreateCeremonyPage from './pages/CreateCeremonyPage'
 import CeremonyDetailPage from './pages/CeremonyDetailPage'
 import RandomToolsPage from './pages/RandomToolsPage'
 import VerificationGuidePage from './pages/VerificationGuidePage'
+import PoolDemoPage from './pages/PoolDemoPage'
 import NotFoundPage from './pages/NotFoundPage'
 
 export default function App() {
@@ -15,6 +16,7 @@ export default function App() {
         <Route path="/create" element={<CreateCeremonyPage />} />
         <Route path="/ceremonies/:id" element={<CeremonyDetailPage />} />
         <Route path="/random" element={<RandomToolsPage />} />
+        <Route path="/pools/demo" element={<PoolDemoPage />} />
         <Route path="/verify" element={<VerificationGuidePage />} />
         <Route path="/verify/:ceremonyId" element={<VerificationGuidePage />} />
         <Route path="*" element={<NotFoundPage />} />

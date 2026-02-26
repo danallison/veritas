@@ -4,6 +4,7 @@ module Veritas.DB.Migrations
   ) where
 
 import Database.PostgreSQL.Simple (Connection, Query, execute_)
+import Veritas.DB.PoolMigrations (runPoolMigrations)
 
 -- | Run all migrations (idempotent).
 runMigrations :: Connection -> IO ()
@@ -27,6 +28,8 @@ runMigrations conn = do
   -- Phase 5: Self-contained ceremony identity
   execute_ conn "ALTER TABLE ceremonies ADD COLUMN IF NOT EXISTS identity_mode TEXT NOT NULL DEFAULT 'anonymous'"
   execute_ conn createCeremonyParticipantsTable
+  -- Pool computing tables
+  runPoolMigrations conn
   pure ()
 
 createCeremoniesTable :: Query

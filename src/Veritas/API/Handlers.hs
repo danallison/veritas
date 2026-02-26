@@ -1,7 +1,7 @@
 -- | Servant request handlers for the Veritas API.
 module Veritas.API.Handlers
   ( server
-  , fullServer
+  , docsHandler
   , AppEnv(..)
   , validateCeremonyType
   , validateRequest
@@ -79,10 +79,6 @@ server env =
   :<|> serverPubKey env
   :<|> healthCheck
   :<|> beaconVerificationGuide env
-
--- | Wire up all handlers including docs endpoint
-fullServer :: AppEnv -> Server FullAPI
-fullServer env = server env :<|> docsHandler
 
 -- | Serve the OpenAPI 3.0 JSON spec
 docsHandler :: Handler OpenApi

@@ -6,10 +6,11 @@ import Network.Wai (Middleware)
 import Network.Wai.Handler.Warp (run, defaultSettings, setPort)
 import Network.Wai.Middleware.RequestLogger (logStdout)
 import Network.Wai.Middleware.Cors (cors, simpleCorsResourcePolicy, CorsResourcePolicy(..))
-import Servant (serve)
+import Servant (serve, (:<|>)((:<|>)))
 
 import Veritas.API.Types (fullApi)
-import Veritas.API.Handlers (fullServer, AppEnv(..))
+import Veritas.API.Handlers (server, docsHandler, AppEnv(..))
+import Veritas.API.PoolHandlers (poolServer)
 import Veritas.API.RateLimit (newRateLimiter, RateLimitConfig(..))
 import Veritas.Config (loadConfig, Config(..), WorkerConfig(..), DrandConfig(..))
 import Veritas.Crypto.Signatures (loadOrGenerateKeyPair)
@@ -20,6 +21,7 @@ import Veritas.Workers.ExpiryChecker (runExpiryChecker)
 import Veritas.Workers.AutoResolver (runAutoResolver)
 import Veritas.Workers.RevealDeadlineChecker (runRevealDeadlineChecker)
 import Veritas.Workers.BeaconFetcher (runBeaconFetcher)
+import Veritas.Workers.ValidatorSelector (runValidatorSelector)
 import Veritas.External.Drand (fetchChainInfo, ChainInfo(..))
 
 import qualified Network.Wai.Handler.WarpTLS as TLS
@@ -82,13 +84,14 @@ main = bracket initLogEnv closeLogEnv $ \logEnv -> do
   let middleware :: Middleware
       middleware = logStdout . rateLimiter . cors corsPolicy
 
-  let app = middleware (serve fullApi (fullServer env))
+  let app = middleware (serve fullApi (server env :<|> poolServer env :<|> docsHandler))
 
   -- Start background workers
   withAsync (runExpiryChecker logEnv pool (workerExpiryInterval workerCfg)) $ \_ ->
     withAsync (runAutoResolver logEnv pool keyPair (workerResolveInterval workerCfg)) $ \_ ->
       withAsync (runRevealDeadlineChecker logEnv pool (workerRevealInterval workerCfg)) $ \_ ->
-        withAsync (runBeaconFetcher logEnv pool drandCfg (workerBeaconInterval workerCfg)) $ \_ -> do
+        withAsync (runBeaconFetcher logEnv pool drandCfg (workerBeaconInterval workerCfg)) $ \_ ->
+          withAsync (runValidatorSelector logEnv pool drandCfg (workerBeaconInterval workerCfg)) $ \_ -> do
           runKatipT logEnv $ logMsg "main" InfoS "Background workers started"
           case (configTLSCert config, configTLSKey config) of
             (Just certPath, Just keyPath) -> do

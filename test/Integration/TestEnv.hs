@@ -19,11 +19,12 @@ import Database.PostgreSQL.Simple (connectPostgreSQL, close)
 import Network.HTTP.Types (methodPost)
 import Network.Wai (Application, defaultRequest, Request(..))
 import Network.Wai.Test (SResponse(..), Session, runSession, setPath, request, srequest, SRequest(..))
-import Servant (serve)
+import Servant (serve, (:<|>)((:<|>)))
 import System.Environment (lookupEnv)
 import Test.Hspec (expectationFailure)
 
-import Veritas.API.Handlers (AppEnv(..), fullServer)
+import Veritas.API.Handlers (AppEnv(..), server, docsHandler)
+import Veritas.API.PoolHandlers (poolServer)
 import Veritas.API.Types (fullApi)
 import Veritas.Config (DrandConfig(..))
 import Veritas.Crypto.Signatures (KeyPair, generateKeyPair)
@@ -64,7 +65,7 @@ withTestApp action = do
         , envLogEnv      = logEnv
         , envDrandConfig = drandCfg
         }
-      app = serve fullApi (fullServer env)
+      app = serve fullApi (server env :<|> poolServer env :<|> docsHandler)
       ienv = IntegrationEnv
         { ieApp     = app
         , iePool    = pool

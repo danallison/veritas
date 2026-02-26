@@ -48,6 +48,7 @@ import GHC.Natural (Natural)
 import Servant.API
 
 import Veritas.Core.Types (Phase, CeremonyType, EntropyMethod, CommitmentMode, NonParticipationPolicy, BeaconSpec, IdentityMode)
+import Veritas.API.PoolTypes (PoolAPI)
 
 -- | The full Veritas API
 type VeritasAPI =
@@ -81,8 +82,8 @@ type VeritasAPI =
 api :: Proxy VeritasAPI
 api = Proxy
 
--- | Full API including the docs endpoint
-type FullAPI = VeritasAPI :<|> "docs" :> Get '[JSON] Data.OpenApi.OpenApi
+-- | Full API including pool computing and the docs endpoint
+type FullAPI = VeritasAPI :<|> PoolAPI :<|> "docs" :> Get '[JSON] Data.OpenApi.OpenApi
 
 fullApi :: Proxy FullAPI
 fullApi = Proxy

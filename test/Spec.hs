@@ -24,6 +24,10 @@ import qualified Integration.LifecycleSpec
 import qualified Integration.ErrorSpec
 import qualified Integration.AuditLogSpec
 import qualified Integration.StandaloneSpec
+import qualified Veritas.Pool.SealSpec
+import qualified Veritas.Pool.SelectionSpec
+import qualified Veritas.Pool.ComparisonSpec
+import qualified Veritas.Pool.StateMachineSpec
 
 main :: IO ()
 main = hspec $ do
@@ -49,3 +53,7 @@ main = hspec $ do
   describe "Integration.ErrorCases" Integration.ErrorSpec.spec
   describe "Integration.AuditLog" Integration.AuditLogSpec.spec
   describe "Integration.Standalone" Integration.StandaloneSpec.spec
+  describe "Pool.Seal" Veritas.Pool.SealSpec.spec
+  describe "Pool.Selection" Veritas.Pool.SelectionSpec.spec
+  describe "Pool.Comparison" Veritas.Pool.ComparisonSpec.spec
+  describe "Pool.StateMachine" Veritas.Pool.StateMachineSpec.spec
