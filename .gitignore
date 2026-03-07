@@ -4,3 +4,8 @@ dist-newstyle/
 *.dyn_hi
 *.dyn_o
 node_modules/
+.env
+.env.*
+!.env.example
+*.pem
+*.key

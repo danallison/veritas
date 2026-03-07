@@ -94,19 +94,13 @@ Prism.js syntax-highlighted output is rendered as raw HTML. The interpolated val
 
 **Recommendation:** Run verification code in a sandboxed Web Worker, or escape all interpolated values as JavaScript string literals.
 
-#### 10. `.gitignore` missing sensitive file patterns
+#### 10. ~~`.gitignore` missing sensitive file patterns~~ **ADDRESSED**
 
 **Location:** `.gitignore`
 
-No exclusions for `.env`, `*.pem`, or `*.key` files. Sensitive files placed in the project root could be accidentally committed.
+~~No exclusions for `.env`, `*.pem`, or `*.key` files. Sensitive files placed in the project root could be accidentally committed.~~
 
-**Recommendation:** Add:
-```
-.env
-.env.*
-*.pem
-*.key
-```
+**Resolution:** Added `.env`, `.env.*`, `*.pem`, and `*.key` patterns to `.gitignore` (with `!.env.example` exception).
 
 ---
 
