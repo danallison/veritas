@@ -97,10 +97,10 @@ describe('API client request function', () => {
   })
 
   it('VITE_API_BASE prefix is applied to all paths', async () => {
-    const fetchMock = mockFetch({ ok: true, status: 200, body: [] })
+    const fetchMock = mockFetch({ ok: true, status: 200, body: { status: 'ok', version: '1.0.0' } })
     const { api } = await loadClient()
 
-    await api.listCeremonies()
+    await api.health()
 
     const [url] = fetchMock.mock.calls[0]
     expect((url as string).startsWith(TEST_BASE)).toBe(true)
@@ -136,16 +136,6 @@ describe('API method paths', () => {
 
     const [url] = fetchMock.mock.calls[0]
     expect(url).toBe(`${TEST_BASE}/ceremonies/abc-123/verify`)
-  })
-
-  it('listCeremonies with phase filter adds query param', async () => {
-    const fetchMock = mockFetch({ ok: true, status: 200, body: [] })
-    const { api } = await loadClient()
-
-    await api.listCeremonies('Pending')
-
-    const [url] = fetchMock.mock.calls[0]
-    expect(url).toBe(`${TEST_BASE}/ceremonies?phase=Pending`)
   })
 
   it('randomInt includes min and max query params', async () => {

@@ -55,7 +55,6 @@ type VeritasAPI =
        -- Ceremony lifecycle
        "ceremonies" :> ReqBody '[JSON] CreateCeremonyRequest :> Post '[JSON] CeremonyResponse
   :<|> "ceremonies" :> Capture "id" UUID :> Get '[JSON] CeremonyResponse
-  :<|> "ceremonies" :> QueryParam "phase" Text :> Get '[JSON] [CeremonyResponse]
   :<|> "ceremonies" :> Capture "id" UUID :> "commit" :> ReqBody '[JSON] CommitRequest :> Post '[JSON] CommitResponse
   :<|> "ceremonies" :> Capture "id" UUID :> "reveal" :> ReqBody '[JSON] RevealRequest :> Post '[JSON] RevealResponse
   :<|> "ceremonies" :> Capture "id" UUID :> "outcome" :> Get '[JSON] OutcomeResponse

@@ -178,43 +178,6 @@ spec = aroundAll withTestApp $ beforeWith cleanDB $ do
       verify <- decodeBody verifyResp :: IO VerifyResponse
       vrValid verify `shouldBe` True
 
-    it "list ceremonies with phase filter" $ \env -> do
-      -- Create two VRF ceremonies, finalize one
-      req1 <- mkVRFCeremonyReq 1
-      resp1 <- testPost (ieApp env) "/ceremonies" req1
-      c1 <- decodeBody resp1 :: IO CeremonyResponse
-      let c1id = crspId c1
-          c1Path = "/ceremonies/" <> uuidToPath c1id
-
-      req2 <- mkVRFCeremonyReq 2
-      _ <- testPost (ieApp env) "/ceremonies" req2
-
-      -- Finalize the first: join -> ack -> commit
-      tp <- mkTestParticipant
-      _ <- testPost (ieApp env) (c1Path <> "/join") (mkJoinRequest tp)
-      cerResp <- testGet (ieApp env) c1Path
-      cerState <- decodeBody cerResp :: IO CeremonyResponse
-      _ <- testPost (ieApp env) (c1Path <> "/ack-roster") (mkAckRosterRequest c1id cerState tp)
-      cerResp2 <- testGet (ieApp env) c1Path
-      cerState2 <- decodeBody cerResp2 :: IO CeremonyResponse
-      _ <- testPost (ieApp env) (c1Path <> "/commit") (mkSignedCommitRequest c1id cerState2 tp)
-
-      -- List all
-      allResp <- testGet (ieApp env) "/ceremonies"
-      statusCode (simpleStatus allResp) `shouldBe` 200
-      allCeremonies <- decodeBody allResp :: IO [CeremonyResponse]
-      length allCeremonies `shouldBe` 2
-
-      -- Filter by gathering (the 2-party ceremony is still in Gathering)
-      gatheringResp <- testGet (ieApp env) "/ceremonies?phase=gathering"
-      gatheringList <- decodeBody gatheringResp :: IO [CeremonyResponse]
-      length gatheringList `shouldBe` 1
-
-      -- Filter by finalized
-      finalizedResp <- testGet (ieApp env) "/ceremonies?phase=finalized"
-      finalized <- decodeBody finalizedResp :: IO [CeremonyResponse]
-      length finalized `shouldBe` 1
-
 -- | Truncate tables before each test.
 -- Used via hspec's 'before' combinator.
 cleanDB :: IntegrationEnv -> IO IntegrationEnv

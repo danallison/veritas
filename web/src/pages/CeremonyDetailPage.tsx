@@ -1,5 +1,6 @@
 import { useParams } from 'react-router-dom'
 import { useCeremony } from '../hooks/useCeremony'
+import { useParticipant } from '../hooks/useParticipant'
 import PhaseIndicator from '../components/PhaseIndicator'
 import CopyLinkButton from '../components/CopyLinkButton'
 import JoinForm from '../components/JoinForm'
@@ -37,6 +38,7 @@ const METHOD_LABELS: Record<EntropyMethod, string> = {
 export default function CeremonyDetailPage() {
   const { id } = useParams<{ id: string }>()
   const { ceremony, error, loading, refetch } = useCeremony(id)
+  const { participantId } = useParticipant()
 
   if (loading) return <p className="text-gray-500">Loading ceremony...</p>
   if (error) return <p className="text-red-600">{error}</p>
@@ -102,7 +104,7 @@ export default function CeremonyDetailPage() {
       )}
 
       {/* Phase-appropriate action */}
-      {ceremony.phase === 'Gathering' && (
+      {ceremony.phase === 'Gathering' && !ceremony.roster?.some(p => p.participant_id === participantId) && (
         <JoinForm ceremonyId={id} onJoined={refetch} />
       )}
 

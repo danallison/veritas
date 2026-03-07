@@ -1,34 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { api } from '../api/client'
-import type { CeremonyResponse, EntropyMethod, Phase } from '../api/types'
-
-const PHASE_LABELS: Record<Phase, string> = {
-  Pending: 'Pending',
-  AwaitingReveals: 'Awaiting reveals',
-  AwaitingBeacon: 'Awaiting beacon',
-  Resolving: 'Determining outcome',
-  Finalized: 'Finalized',
-  Expired: 'Expired',
-  Cancelled: 'Cancelled',
-  Disputed: 'Disputed',
-}
-
-const METHOD_LABELS: Record<EntropyMethod, string> = {
-  OfficiantVRF: 'Server generated',
-  ExternalBeacon: 'External beacon',
-  ParticipantReveal: 'Participant reveal',
-  Combined: 'Combined',
-}
 
 export default function HomePage() {
   const [joinId, setJoinId] = useState('')
-  const [ceremonies, setCeremonies] = useState<CeremonyResponse[]>([])
   const navigate = useNavigate()
-
-  useEffect(() => {
-    api.listCeremonies().then(setCeremonies).catch(() => {})
-  }, [])
 
   const handleJoin = (e: React.FormEvent) => {
     e.preventDefault()
@@ -73,39 +48,6 @@ export default function HomePage() {
           Join
         </button>
       </form>
-
-      {ceremonies.length > 0 && (
-        <div>
-          <h2 className="text-lg font-semibold mb-3">Recent Ceremonies</h2>
-          <div className="space-y-2">
-            {ceremonies.slice(0, 10).map((c) => (
-              <Link
-                key={c.id}
-                to={`/ceremonies/${c.id}`}
-                className="block p-3 bg-white border border-gray-200 rounded-lg hover:border-indigo-300 transition-colors"
-              >
-                <div className="flex justify-between items-center">
-                  <div>
-                    <p className="font-medium text-sm">{c.question}</p>
-                    <p className="text-xs text-gray-500">
-                      {c.ceremony_type.tag}
-                      {' \u00B7 '}{METHOD_LABELS[c.entropy_method]}
-                      {' \u00B7 '}{c.commitment_count}/{c.required_parties} committed
-                    </p>
-                  </div>
-                  <span className={`text-xs px-2 py-0.5 rounded-full ${
-                    c.phase === 'Finalized' ? 'bg-green-100 text-green-700' :
-                    c.phase === 'Pending' ? 'bg-yellow-100 text-yellow-700' :
-                    'bg-gray-100 text-gray-600'
-                  }`}>
-                    {PHASE_LABELS[c.phase]}
-                  </span>
-                </div>
-              </Link>
-            ))}
-          </div>
-        </div>
-      )}
     </div>
   )
 }

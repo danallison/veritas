@@ -3,7 +3,6 @@ module Veritas.DB.Queries
   ( -- * Ceremonies
     insertCeremony
   , getCeremony
-  , listCeremonies
   , updateCeremonyPhase
 
     -- * Commitments
@@ -11,8 +10,6 @@ module Veritas.DB.Queries
   , getCommitments
   , getCommitmentCount
   , getCommittedParticipants
-  , getCommitmentCountsBatch
-  , getCommittedParticipantsBatch
   , CommittedParticipant(..)
 
     -- * Entropy Reveals
@@ -135,21 +132,6 @@ getCeremony conn (CeremonyId cid) =
     \FROM ceremonies WHERE id = ?"
     (Only cid)
 
-listCeremonies :: Connection -> Maybe Text -> IO [CeremonyRow]
-listCeremonies conn Nothing =
-  query_ conn
-    "SELECT id, question, ceremony_type, entropy_method, required_parties, \
-    \commitment_mode, commit_deadline, reveal_deadline, non_participation_policy, \
-    \beacon_spec, identity_mode, phase, created_by, created_at \
-    \FROM ceremonies ORDER BY created_at DESC"
-listCeremonies conn (Just phaseFilter) =
-  query conn
-    "SELECT id, question, ceremony_type, entropy_method, required_parties, \
-    \commitment_mode, commit_deadline, reveal_deadline, non_participation_policy, \
-    \beacon_spec, identity_mode, phase, created_by, created_at \
-    \FROM ceremonies WHERE phase = ? ORDER BY created_at DESC"
-    (Only phaseFilter)
-
 updateCeremonyPhase :: Connection -> CeremonyId -> Phase -> IO ()
 updateCeremonyPhase conn (CeremonyId cid) newPhase = do
   _ <- execute conn
@@ -206,21 +188,6 @@ getCommittedParticipants conn (CeremonyId cid) =
   query conn
     "SELECT participant_id, display_name FROM commitments WHERE ceremony_id = ? ORDER BY committed_at"
     (Only cid)
-
-getCommitmentCountsBatch :: Connection -> [CeremonyId] -> IO [(UUID, Int)]
-getCommitmentCountsBatch _ [] = pure []
-getCommitmentCountsBatch conn cids =
-  query conn
-    "SELECT ceremony_id, COUNT(*)::int FROM commitments WHERE ceremony_id IN ? GROUP BY ceremony_id"
-    (Only (In (map unCeremonyId cids)))
-
-getCommittedParticipantsBatch :: Connection -> [CeremonyId] -> IO [(UUID, UUID, Maybe Text)]
-getCommittedParticipantsBatch _ [] = pure []
-getCommittedParticipantsBatch conn cids =
-  query conn
-    "SELECT ceremony_id, participant_id, display_name FROM commitments \
-    \WHERE ceremony_id IN ? ORDER BY committed_at"
-    (Only (In (map unCeremonyId cids)))
 
 -- === Entropy Reveals ===
 

@@ -49,9 +49,6 @@ const api = {
   getCeremony: (id: string) =>
     get<CeremonyResponse>(`/ceremonies/${id}`),
 
-  listCeremonies: (phase?: string) =>
-    get<CeremonyResponse[]>(`/ceremonies${phase ? `?phase=${phase}` : ''}`),
-
   join: (id: string, req: JoinRequest) =>
     post<JoinResponse>(`/ceremonies/${id}/join`, req),
 

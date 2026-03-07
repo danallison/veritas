@@ -19,7 +19,6 @@ import qualified Data.ByteString.Char8 as BS8
 import qualified Data.ByteString.Lazy as LBS
 import Data.List (find, nub)
 import qualified Data.List.NonEmpty as NE
-import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
@@ -64,7 +63,6 @@ server :: AppEnv -> Server VeritasAPI
 server env =
        createCeremony env
   :<|> getCeremonyH env
-  :<|> listCeremoniesH env
   :<|> commitToCeremony env
   :<|> revealEntropy env
   :<|> getOutcomeH env
@@ -273,22 +271,6 @@ getCeremonyH AppEnv{..} cid = do
         let roster = Just (map participantRowToRosterEntry prows)
         pure (c, ps, roster)
       pure $ ceremonyRowToResponse row count participants mRoster
-
-listCeremoniesH :: AppEnv -> Maybe Text -> Handler [CeremonyResponse]
-listCeremoniesH AppEnv{..} phaseFilter = do
-  liftIO $ withConnection envPool $ \conn -> do
-    rows <- Q.listCeremonies conn phaseFilter
-    let cids = map (CeremonyId . Q.crId) rows
-    countRows <- Q.getCommitmentCountsBatch conn cids
-    partRows <- Q.getCommittedParticipantsBatch conn cids
-    let countMap = Map.fromList countRows
-        partMap = Map.fromListWith (flip (++)) [(cid', [Q.CommittedParticipant pid dn]) | (cid', pid, dn) <- partRows]
-    pure $ map (\row ->
-      let uid = Q.crId row
-          count = Map.findWithDefault 0 uid countMap
-          participants = Map.findWithDefault [] uid partMap
-      in ceremonyRowToResponse row count participants Nothing
-      ) rows
 
 commitToCeremony :: AppEnv -> UUID -> CommitRequest -> Handler CommitResponse
 commitToCeremony AppEnv{..} cid req = do

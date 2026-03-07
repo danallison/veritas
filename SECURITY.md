@@ -38,13 +38,15 @@ Haskell's `error` throws an unrecoverable exception. Unexpected database values 
 
 **Recommendation:** Replace `error` with `Either`-returning functions and handle failures gracefully with structured logging.
 
-#### 4. No pagination on list endpoints
+#### 4. ~~No pagination on list endpoints~~ **PARTIALLY ADDRESSED**
 
-**Location:** `src/Veritas/DB/Queries.hs:138-151`, `src/Veritas/DB/PoolQueries.hs:174-179,203-209`
+**Location:** ~~`src/Veritas/DB/Queries.hs:138-151`~~, `src/Veritas/DB/PoolQueries.hs:174-179,203-209`
 
-`listCeremonies`, `getPoolCacheEntries`, and `getPoolRounds` have no `LIMIT` clause. A single request can return all rows, causing high memory usage and potential denial of service.
+~~`listCeremonies`,~~ `getPoolCacheEntries`, and `getPoolRounds` have no `LIMIT` clause. A single request can return all rows, causing high memory usage and potential denial of service.
 
-**Recommendation:** Add a default `LIMIT` (e.g., 100) and support pagination via query parameters (`?limit=50&offset=0`).
+**Resolution (partial):** The `GET /ceremonies` list endpoint has been removed entirely — ceremonies are now secret, accessible only by ID. The remaining pool list endpoints (`getPoolCacheEntries`, `getPoolRounds`) are scoped to a specific pool ID and are lower risk, but still lack pagination.
+
+**Recommendation:** Add a default `LIMIT` (e.g., 100) and support pagination via query parameters for the remaining pool endpoints.
 
 #### 5. Rate limiter bypassed behind reverse proxy
 

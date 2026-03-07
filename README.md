@@ -136,7 +136,6 @@ The backend serves a REST API with OpenAPI 3.0 documentation at `GET /docs`.
 |--------|------|-------------|
 | `POST` | `/ceremonies` | Create a new ceremony |
 | `GET` | `/ceremonies/:id` | Get ceremony status |
-| `GET` | `/ceremonies` | List ceremonies (optional `?phase=` filter) |
 | `POST` | `/ceremonies/:id/join` | Register a public key (self-certified) |
 | `POST` | `/ceremonies/:id/ack-roster` | Sign the roster (self-certified) |
 | `GET` | `/ceremonies/:id/roster` | Get the participant roster |
