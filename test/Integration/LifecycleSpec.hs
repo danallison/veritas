@@ -1,6 +1,5 @@
 module Integration.LifecycleSpec (spec) where
 
-import qualified Data.UUID.V4 as UUID4
 import Network.HTTP.Types (statusCode)
 import Network.Wai.Test (simpleStatus)
 import Test.Hspec
@@ -15,28 +14,46 @@ import Integration.TestEnv
 spec :: Spec
 spec = aroundAll withTestApp $ beforeWith cleanDB $ do
 
-    it "VRF 1-party: create -> commit -> finalized -> outcome -> verify" $ \env -> do
-      -- Create ceremony
+    it "VRF 1-party: create -> join -> ack -> commit -> finalized -> outcome -> verify" $ \env -> do
+      -- Create ceremony (starts in Gathering)
       req <- mkVRFCeremonyReq 1
       resp <- testPost (ieApp env) "/ceremonies" req
       statusCode (simpleStatus resp) `shouldBe` 200
       ceremony <- decodeBody resp :: IO CeremonyResponse
-      crspPhase ceremony `shouldBe` Pending
+      crspPhase ceremony `shouldBe` Gathering
 
       let cid = crspId ceremony
           cidPath = "/ceremonies/" <> uuidToPath cid
 
-      -- Commit (VRF resolves inline; response shows Resolving but DB is Finalized)
-      pid <- UUID4.nextRandom
-      commitResp <- testPost (ieApp env) (cidPath <> "/commit") (mkCommitRequest pid)
+      -- Join with Ed25519 keypair
+      tp <- mkTestParticipant
+      joinResp <- testPost (ieApp env) (cidPath <> "/join") (mkJoinRequest tp)
+      statusCode (simpleStatus joinResp) `shouldBe` 200
+
+      -- GET ceremony to get roster for ack signing
+      cerResp1 <- testGet (ieApp env) cidPath
+      cerState1 <- decodeBody cerResp1 :: IO CeremonyResponse
+      crspPhase cerState1 `shouldBe` AwaitingRosterAcks
+
+      -- Ack roster
+      ackResp <- testPost (ieApp env) (cidPath <> "/ack-roster") (mkAckRosterRequest cid cerState1 tp)
+      statusCode (simpleStatus ackResp) `shouldBe` 200
+
+      -- GET ceremony — should be in Pending after all acks
+      cerResp2 <- testGet (ieApp env) cidPath
+      cerState2 <- decodeBody cerResp2 :: IO CeremonyResponse
+      crspPhase cerState2 `shouldBe` Pending
+
+      -- Commit with signature (VRF resolves inline)
+      commitResp <- testPost (ieApp env) (cidPath <> "/commit") (mkSignedCommitRequest cid cerState2 tp)
       statusCode (simpleStatus commitResp) `shouldBe` 200
       commit <- decodeBody commitResp :: IO CommitResponse
       cmrPhase commit `shouldBe` Resolving
 
       -- GET ceremony — DB phase should be Finalized
-      cerResp <- testGet (ieApp env) cidPath
-      cerState <- decodeBody cerResp :: IO CeremonyResponse
-      crspPhase cerState `shouldBe` Finalized
+      cerResp3 <- testGet (ieApp env) cidPath
+      cerState3 <- decodeBody cerResp3 :: IO CeremonyResponse
+      crspPhase cerState3 `shouldBe` Finalized
 
       -- GET outcome
       outcomeResp <- testGet (ieApp env) (cidPath <> "/outcome")
@@ -56,25 +73,42 @@ spec = aroundAll withTestApp $ beforeWith cleanDB $ do
       let cid = crspId ceremony
           cidPath = "/ceremonies/" <> uuidToPath cid
 
+      -- Join two participants
+      tp1 <- mkTestParticipant
+      tp2 <- mkTestParticipant
+      _ <- testPost (ieApp env) (cidPath <> "/join") (mkJoinRequest tp1)
+      _ <- testPost (ieApp env) (cidPath <> "/join") (mkJoinRequest tp2)
+
+      -- GET ceremony for roster
+      cerResp1 <- testGet (ieApp env) cidPath
+      cerState1 <- decodeBody cerResp1 :: IO CeremonyResponse
+      crspPhase cerState1 `shouldBe` AwaitingRosterAcks
+
+      -- Both ack roster
+      _ <- testPost (ieApp env) (cidPath <> "/ack-roster") (mkAckRosterRequest cid cerState1 tp1)
+      _ <- testPost (ieApp env) (cidPath <> "/ack-roster") (mkAckRosterRequest cid cerState1 tp2)
+
+      -- GET ceremony — should be Pending
+      cerResp2 <- testGet (ieApp env) cidPath
+      cerState2 <- decodeBody cerResp2 :: IO CeremonyResponse
+      crspPhase cerState2 `shouldBe` Pending
+
       -- First commit: should stay Pending
-      pid1 <- UUID4.nextRandom
-      commit1Resp <- testPost (ieApp env) (cidPath <> "/commit") (mkCommitRequest pid1)
+      commit1Resp <- testPost (ieApp env) (cidPath <> "/commit") (mkSignedCommitRequest cid cerState2 tp1)
       statusCode (simpleStatus commit1Resp) `shouldBe` 200
       commit1 <- decodeBody commit1Resp :: IO CommitResponse
       cmrPhase commit1 `shouldBe` Pending
 
       -- Second commit: quorum met, VRF resolves inline
-      -- Response shows Resolving but DB goes to Finalized
-      pid2 <- UUID4.nextRandom
-      commit2Resp <- testPost (ieApp env) (cidPath <> "/commit") (mkCommitRequest pid2)
+      commit2Resp <- testPost (ieApp env) (cidPath <> "/commit") (mkSignedCommitRequest cid cerState2 tp2)
       statusCode (simpleStatus commit2Resp) `shouldBe` 200
       commit2 <- decodeBody commit2Resp :: IO CommitResponse
       cmrPhase commit2 `shouldBe` Resolving
 
       -- GET ceremony — DB phase should be Finalized
-      cerResp <- testGet (ieApp env) cidPath
-      cerState <- decodeBody cerResp :: IO CeremonyResponse
-      crspPhase cerState `shouldBe` Finalized
+      cerResp3 <- testGet (ieApp env) cidPath
+      cerState3 <- decodeBody cerResp3 :: IO CeremonyResponse
+      crspPhase cerState3 `shouldBe` Finalized
 
       -- Outcome exists
       outcomeResp <- testGet (ieApp env) (cidPath <> "/outcome")
@@ -85,31 +119,47 @@ spec = aroundAll withTestApp $ beforeWith cleanDB $ do
       verify <- decodeBody verifyResp :: IO VerifyResponse
       vrValid verify `shouldBe` True
 
-    it "ParticipantReveal 2-party: commit -> reveal -> resolve -> finalized" $ \env -> do
+    it "ParticipantReveal 2-party: join -> ack -> commit -> reveal -> resolve -> finalized" $ \env -> do
       req <- mkParticipantRevealCeremonyReq 2
       resp <- testPost (ieApp env) "/ceremonies" req
       ceremony <- decodeBody resp :: IO CeremonyResponse
       let cid = crspId ceremony
           cidPath = "/ceremonies/" <> uuidToPath cid
 
-      -- Two participants commit with seals
-      pid1 <- UUID4.nextRandom
-      pid2 <- UUID4.nextRandom
+      -- Join two participants
+      tp1 <- mkTestParticipant
+      tp2 <- mkTestParticipant
+      _ <- testPost (ieApp env) (cidPath <> "/join") (mkJoinRequest tp1)
+      _ <- testPost (ieApp env) (cidPath <> "/join") (mkJoinRequest tp2)
 
-      _ <- testPost (ieApp env) (cidPath <> "/commit") (mkCommitRequestWithSeal cid pid1 1)
-      commit2Resp <- testPost (ieApp env) (cidPath <> "/commit") (mkCommitRequestWithSeal cid pid2 2)
+      -- GET ceremony for roster
+      cerResp1 <- testGet (ieApp env) cidPath
+      cerState1 <- decodeBody cerResp1 :: IO CeremonyResponse
+
+      -- Both ack roster
+      _ <- testPost (ieApp env) (cidPath <> "/ack-roster") (mkAckRosterRequest cid cerState1 tp1)
+      _ <- testPost (ieApp env) (cidPath <> "/ack-roster") (mkAckRosterRequest cid cerState1 tp2)
+
+      -- GET ceremony for commit signing
+      cerResp2 <- testGet (ieApp env) cidPath
+      cerState2 <- decodeBody cerResp2 :: IO CeremonyResponse
+      crspPhase cerState2 `shouldBe` Pending
+
+      -- Two participants commit with seals
+      _ <- testPost (ieApp env) (cidPath <> "/commit") (mkSignedCommitRequestWithSeal cid cerState2 tp1 1)
+      commit2Resp <- testPost (ieApp env) (cidPath <> "/commit") (mkSignedCommitRequestWithSeal cid cerState2 tp2 2)
       commit2 <- decodeBody commit2Resp :: IO CommitResponse
       cmrPhase commit2 `shouldBe` AwaitingReveals
 
       -- Two reveals
-      _ <- testPost (ieApp env) (cidPath <> "/reveal") (mkRevealRequest pid1 1)
-      reveal2Resp <- testPost (ieApp env) (cidPath <> "/reveal") (mkRevealRequest pid2 2)
+      _ <- testPost (ieApp env) (cidPath <> "/reveal") (mkRevealRequest (tpId tp1) 1)
+      reveal2Resp <- testPost (ieApp env) (cidPath <> "/reveal") (mkRevealRequest (tpId tp2) 2)
       statusCode (simpleStatus reveal2Resp) `shouldBe` 200
 
       -- Check ceremony is in Resolving phase
-      cerResp <- testGet (ieApp env) cidPath
-      cerState <- decodeBody cerResp :: IO CeremonyResponse
-      crspPhase cerState `shouldBe` Resolving
+      cerResp3 <- testGet (ieApp env) cidPath
+      cerState3 <- decodeBody cerResp3 :: IO CeremonyResponse
+      crspPhase cerState3 `shouldBe` Resolving
 
       -- Resolve using test helper (replicates AutoResolver)
       resolveTestCeremony (iePool env) (ieKeyPair env) (CeremonyId cid)
@@ -133,14 +183,21 @@ spec = aroundAll withTestApp $ beforeWith cleanDB $ do
       req1 <- mkVRFCeremonyReq 1
       resp1 <- testPost (ieApp env) "/ceremonies" req1
       c1 <- decodeBody resp1 :: IO CeremonyResponse
-      let c1Path = "/ceremonies/" <> uuidToPath (crspId c1)
+      let c1id = crspId c1
+          c1Path = "/ceremonies/" <> uuidToPath c1id
 
       req2 <- mkVRFCeremonyReq 2
       _ <- testPost (ieApp env) "/ceremonies" req2
 
-      -- Finalize the first by committing
-      pid <- UUID4.nextRandom
-      _ <- testPost (ieApp env) (c1Path <> "/commit") (mkCommitRequest pid)
+      -- Finalize the first: join -> ack -> commit
+      tp <- mkTestParticipant
+      _ <- testPost (ieApp env) (c1Path <> "/join") (mkJoinRequest tp)
+      cerResp <- testGet (ieApp env) c1Path
+      cerState <- decodeBody cerResp :: IO CeremonyResponse
+      _ <- testPost (ieApp env) (c1Path <> "/ack-roster") (mkAckRosterRequest c1id cerState tp)
+      cerResp2 <- testGet (ieApp env) c1Path
+      cerState2 <- decodeBody cerResp2 :: IO CeremonyResponse
+      _ <- testPost (ieApp env) (c1Path <> "/commit") (mkSignedCommitRequest c1id cerState2 tp)
 
       -- List all
       allResp <- testGet (ieApp env) "/ceremonies"
@@ -148,10 +205,10 @@ spec = aroundAll withTestApp $ beforeWith cleanDB $ do
       allCeremonies <- decodeBody allResp :: IO [CeremonyResponse]
       length allCeremonies `shouldBe` 2
 
-      -- Filter by pending
-      pendingResp <- testGet (ieApp env) "/ceremonies?phase=pending"
-      pendingList <- decodeBody pendingResp :: IO [CeremonyResponse]
-      length pendingList `shouldBe` 1
+      -- Filter by gathering (the 2-party ceremony is still in Gathering)
+      gatheringResp <- testGet (ieApp env) "/ceremonies?phase=gathering"
+      gatheringList <- decodeBody gatheringResp :: IO [CeremonyResponse]
+      length gatheringList `shouldBe` 1
 
       -- Filter by finalized
       finalizedResp <- testGet (ieApp env) "/ceremonies?phase=finalized"

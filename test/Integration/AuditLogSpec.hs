@@ -1,6 +1,5 @@
 module Integration.AuditLogSpec (spec) where
 
-import qualified Data.UUID.V4 as UUID4
 import Network.HTTP.Types (statusCode)
 import Network.Wai.Test (simpleStatus)
 import Test.Hspec
@@ -22,9 +21,15 @@ spec = aroundAll withTestApp $ beforeWith cleanDB $ do
       let cid = crspId ceremony
           cidPath = "/ceremonies/" <> uuidToPath cid
 
-      -- Commit (triggers finalization for 1-party VRF)
-      pid <- UUID4.nextRandom
-      _ <- testPost (ieApp env) (cidPath <> "/commit") (mkCommitRequest pid)
+      -- Join, ack, commit (triggers finalization for 1-party VRF)
+      tp <- mkTestParticipant
+      _ <- testPost (ieApp env) (cidPath <> "/join") (mkJoinRequest tp)
+      cerResp1 <- testGet (ieApp env) cidPath
+      cerState1 <- decodeBody cerResp1 :: IO CeremonyResponse
+      _ <- testPost (ieApp env) (cidPath <> "/ack-roster") (mkAckRosterRequest cid cerState1 tp)
+      cerResp2 <- testGet (ieApp env) cidPath
+      cerState2 <- decodeBody cerResp2 :: IO CeremonyResponse
+      _ <- testPost (ieApp env) (cidPath <> "/commit") (mkSignedCommitRequest cid cerState2 tp)
 
       -- Get audit log
       logResp <- testGet (ieApp env) (cidPath <> "/log")
@@ -34,9 +39,12 @@ spec = aroundAll withTestApp $ beforeWith cleanDB $ do
       let entries = alrEntries auditLog
           eventTypes = map alerEventType entries
 
-      -- Expected event order for VRF
+      -- Expected event order for self-certified VRF ceremony
       eventTypes `shouldBe`
         [ "ceremony_created"
+        , "participant_joined"
+        , "roster_finalized"
+        , "roster_acknowledged"
         , "participant_committed"
         , "vrf_generated"
         , "ceremony_resolved"
@@ -47,25 +55,41 @@ spec = aroundAll withTestApp $ beforeWith cleanDB $ do
       req <- mkVRFCeremonyReq 1
       resp <- testPost (ieApp env) "/ceremonies" req
       ceremony <- decodeBody resp :: IO CeremonyResponse
-      let cidPath = "/ceremonies/" <> uuidToPath (crspId ceremony)
+      let cid = crspId ceremony
+          cidPath = "/ceremonies/" <> uuidToPath cid
 
-      pid <- UUID4.nextRandom
-      _ <- testPost (ieApp env) (cidPath <> "/commit") (mkCommitRequest pid)
+      -- Join, ack, commit
+      tp <- mkTestParticipant
+      _ <- testPost (ieApp env) (cidPath <> "/join") (mkJoinRequest tp)
+      cerResp1 <- testGet (ieApp env) cidPath
+      cerState1 <- decodeBody cerResp1 :: IO CeremonyResponse
+      _ <- testPost (ieApp env) (cidPath <> "/ack-roster") (mkAckRosterRequest cid cerState1 tp)
+      cerResp2 <- testGet (ieApp env) cidPath
+      cerState2 <- decodeBody cerResp2 :: IO CeremonyResponse
+      _ <- testPost (ieApp env) (cidPath <> "/commit") (mkSignedCommitRequest cid cerState2 tp)
 
       logResp <- testGet (ieApp env) (cidPath <> "/log")
       auditLog <- decodeBody logResp :: IO AuditLogResponse
 
       let seqNums = map alerSequenceNum (alrEntries auditLog)
-      seqNums `shouldBe` [0, 1, 2, 3, 4]
+      seqNums `shouldBe` [0 .. fromIntegral (length seqNums - 1)]
 
     it "prev_hash chain is valid (each entry links to the previous)" $ \env -> do
       req <- mkVRFCeremonyReq 1
       resp <- testPost (ieApp env) "/ceremonies" req
       ceremony <- decodeBody resp :: IO CeremonyResponse
-      let cidPath = "/ceremonies/" <> uuidToPath (crspId ceremony)
+      let cid = crspId ceremony
+          cidPath = "/ceremonies/" <> uuidToPath cid
 
-      pid <- UUID4.nextRandom
-      _ <- testPost (ieApp env) (cidPath <> "/commit") (mkCommitRequest pid)
+      -- Join, ack, commit
+      tp <- mkTestParticipant
+      _ <- testPost (ieApp env) (cidPath <> "/join") (mkJoinRequest tp)
+      cerResp1 <- testGet (ieApp env) cidPath
+      cerState1 <- decodeBody cerResp1 :: IO CeremonyResponse
+      _ <- testPost (ieApp env) (cidPath <> "/ack-roster") (mkAckRosterRequest cid cerState1 tp)
+      cerResp2 <- testGet (ieApp env) cidPath
+      cerState2 <- decodeBody cerResp2 :: IO CeremonyResponse
+      _ <- testPost (ieApp env) (cidPath <> "/commit") (mkSignedCommitRequest cid cerState2 tp)
 
       logResp <- testGet (ieApp env) (cidPath <> "/log")
       auditLog <- decodeBody logResp :: IO AuditLogResponse
@@ -78,10 +102,18 @@ spec = aroundAll withTestApp $ beforeWith cleanDB $ do
       req <- mkVRFCeremonyReq 1
       resp <- testPost (ieApp env) "/ceremonies" req
       ceremony <- decodeBody resp :: IO CeremonyResponse
-      let cidPath = "/ceremonies/" <> uuidToPath (crspId ceremony)
+      let cid = crspId ceremony
+          cidPath = "/ceremonies/" <> uuidToPath cid
 
-      pid <- UUID4.nextRandom
-      _ <- testPost (ieApp env) (cidPath <> "/commit") (mkCommitRequest pid)
+      -- Join, ack, commit
+      tp <- mkTestParticipant
+      _ <- testPost (ieApp env) (cidPath <> "/join") (mkJoinRequest tp)
+      cerResp1 <- testGet (ieApp env) cidPath
+      cerState1 <- decodeBody cerResp1 :: IO CeremonyResponse
+      _ <- testPost (ieApp env) (cidPath <> "/ack-roster") (mkAckRosterRequest cid cerState1 tp)
+      cerResp2 <- testGet (ieApp env) cidPath
+      cerState2 <- decodeBody cerResp2 :: IO CeremonyResponse
+      _ <- testPost (ieApp env) (cidPath <> "/commit") (mkSignedCommitRequest cid cerState2 tp)
 
       verifyResp <- testGet (ieApp env) (cidPath <> "/verify")
       statusCode (simpleStatus verifyResp) `shouldBe` 200
@@ -96,15 +128,27 @@ spec = aroundAll withTestApp $ beforeWith cleanDB $ do
       let cid = crspId ceremony
           cidPath = "/ceremonies/" <> uuidToPath cid
 
-      -- Two participants commit with seals
-      pid1 <- UUID4.nextRandom
-      pid2 <- UUID4.nextRandom
-      _ <- testPost (ieApp env) (cidPath <> "/commit") (mkCommitRequestWithSeal cid pid1 1)
-      _ <- testPost (ieApp env) (cidPath <> "/commit") (mkCommitRequestWithSeal cid pid2 2)
+      -- Join two participants
+      tp1 <- mkTestParticipant
+      tp2 <- mkTestParticipant
+      _ <- testPost (ieApp env) (cidPath <> "/join") (mkJoinRequest tp1)
+      _ <- testPost (ieApp env) (cidPath <> "/join") (mkJoinRequest tp2)
+
+      -- Ack roster
+      cerResp1 <- testGet (ieApp env) cidPath
+      cerState1 <- decodeBody cerResp1 :: IO CeremonyResponse
+      _ <- testPost (ieApp env) (cidPath <> "/ack-roster") (mkAckRosterRequest cid cerState1 tp1)
+      _ <- testPost (ieApp env) (cidPath <> "/ack-roster") (mkAckRosterRequest cid cerState1 tp2)
+
+      -- Commit both with seals
+      cerResp2 <- testGet (ieApp env) cidPath
+      cerState2 <- decodeBody cerResp2 :: IO CeremonyResponse
+      _ <- testPost (ieApp env) (cidPath <> "/commit") (mkSignedCommitRequestWithSeal cid cerState2 tp1 1)
+      _ <- testPost (ieApp env) (cidPath <> "/commit") (mkSignedCommitRequestWithSeal cid cerState2 tp2 2)
 
       -- Two reveals
-      _ <- testPost (ieApp env) (cidPath <> "/reveal") (mkRevealRequest pid1 1)
-      _ <- testPost (ieApp env) (cidPath <> "/reveal") (mkRevealRequest pid2 2)
+      _ <- testPost (ieApp env) (cidPath <> "/reveal") (mkRevealRequest (tpId tp1) 1)
+      _ <- testPost (ieApp env) (cidPath <> "/reveal") (mkRevealRequest (tpId tp2) 2)
 
       -- Resolve using test helper
       resolveTestCeremony (iePool env) (ieKeyPair env) (CeremonyId cid)
@@ -118,6 +162,11 @@ spec = aroundAll withTestApp $ beforeWith cleanDB $ do
 
       eventTypes `shouldBe`
         [ "ceremony_created"
+        , "participant_joined"
+        , "participant_joined"
+        , "roster_finalized"
+        , "roster_acknowledged"
+        , "roster_acknowledged"
         , "participant_committed"
         , "participant_committed"
         , "reveals_published"

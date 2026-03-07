@@ -1,7 +1,6 @@
 import type { IdentityMode, Phase } from '../api/types'
 
-const ANON_PHASES: Phase[] = ['Pending', 'AwaitingReveals', 'Resolving', 'Finalized']
-const SELF_CERT_PHASES: Phase[] = ['Gathering', 'AwaitingRosterAcks', 'Pending', 'AwaitingReveals', 'Resolving', 'Finalized']
+const PHASES: Phase[] = ['Gathering', 'AwaitingRosterAcks', 'Pending', 'AwaitingReveals', 'Resolving', 'Finalized']
 const TERMINAL: Phase[] = ['Expired', 'Cancelled', 'Disputed']
 
 const LABELS: Record<Phase, string> = {
@@ -19,7 +18,7 @@ const LABELS: Record<Phase, string> = {
 
 export default function PhaseIndicator({
   phase,
-  identityMode = 'Anonymous',
+  identityMode = 'SelfCertified',
 }: {
   phase: Phase
   identityMode?: IdentityMode
@@ -32,7 +31,7 @@ export default function PhaseIndicator({
     )
   }
 
-  const phases = identityMode === 'SelfCertified' ? SELF_CERT_PHASES : ANON_PHASES
+  const phases = PHASES
 
   // Map AwaitingBeacon to the same step as AwaitingReveals
   const lookupPhase = phase === 'AwaitingBeacon' ? 'AwaitingReveals' : phase

@@ -16,7 +16,7 @@ function makeCeremony(overrides: Partial<CeremonyResponse> = {}): CeremonyRespon
     reveal_deadline: null,
     non_participation_policy: null,
     beacon_spec: null,
-    identity_mode: 'Anonymous',
+    identity_mode: 'SelfCertified',
     phase: 'Pending',
     created_by: '00000000-0000-0000-0000-000000000000',
     created_at: '2026-01-01T00:00:00Z',
@@ -73,12 +73,6 @@ describe('ceremonyParams', () => {
       expect(bytesToHex(b1)).not.toBe(bytesToHex(b2))
     })
 
-    it('different identity modes -> different bytes', () => {
-      const b1 = buildCeremonyParamsBytes(makeCeremony({ identity_mode: 'Anonymous' }))
-      const b2 = buildCeremonyParamsBytes(makeCeremony({ identity_mode: 'SelfCertified' }))
-      expect(bytesToHex(b1)).not.toBe(bytesToHex(b2))
-    })
-
     it('does not depend on mutable fields (phase, id, created_by, created_at)', () => {
       const b1 = buildCeremonyParamsBytes(makeCeremony())
       const b2 = buildCeremonyParamsBytes(makeCeremony({
@@ -122,7 +116,7 @@ describe('ceremonyParams', () => {
     // in test/Veritas/Crypto/CeremonyParamsSpec.hs (baseCeremony)
     it('matches Haskell golden hash for base ceremony', async () => {
       const hash = await computeParamsHash(makeCeremony())
-      expect(hash).toBe('c22d9d86ddcbd47e28a8071cfbf796757b2b5e3c80665843a42f61f6a0949a46')
+      expect(hash).toBe('cf082b4901fa9040b8be96fc45586d3b0a7eaecca8c9400b30958a0238a63f78')
     })
   })
 

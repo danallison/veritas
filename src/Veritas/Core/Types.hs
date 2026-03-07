@@ -127,22 +127,20 @@ data BeaconFallback
   deriving stock (Eq, Show, Generic)
   deriving anyclass (FromJSON, ToJSON)
 
--- | Whether participants are anonymous or self-certified via Ed25519 keys
+-- | How participants prove their identity.
+-- TODO: Add OAuth mode here
 data IdentityMode
-  = Anonymous       -- ^ Ephemeral participant IDs, no authentication
-  | SelfCertified   -- ^ Participants register Ed25519 public keys and sign commitments
+  = SelfCertified   -- ^ Participants register Ed25519 public keys and sign commitments
   deriving stock (Eq, Show, Generic)
   deriving anyclass (ToSchema)
 
 instance ToJSON IdentityMode where
-  toJSON Anonymous     = "Anonymous"
   toJSON SelfCertified = "SelfCertified"
 
 instance FromJSON IdentityMode where
   parseJSON = \case
-    String "Anonymous"     -> pure Anonymous
     String "SelfCertified" -> pure SelfCertified
-    _                      -> fail "Expected \"Anonymous\" or \"SelfCertified\""
+    _                      -> fail "Expected \"SelfCertified\""
 
 -- | Ceremony lifecycle phase
 data Phase

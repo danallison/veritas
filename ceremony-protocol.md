@@ -68,7 +68,7 @@ Every ceremony is defined by the following parameters, which are fixed at creati
 
 - **Non-participation policy** (Methods A and D only). What happens if a participant commits but fails to reveal their entropy by the reveal deadline (see Section 7).
 
-- **Identity mode.** How participant identity is established and how commitments are authenticated. The three modes — anonymous, authenticated, and self-certified — offer different tradeoffs between convenience and non-repudiation (see Section 10).
+- **Identity mode.** How participant identity is established and how commitments are authenticated. The two modes — authenticated and self-certified — offer different tradeoffs between convenience and non-repudiation (see Section 10).
 
 ---
 
@@ -333,7 +333,7 @@ Under Method C, the officiant has limited influence (see Section 5).
 
 This is a social and legal property, not a cryptographic one. In a software system, the commitment is recorded and signed. In a physical setting, the commitment is witnessed. The record provides evidence that the commitment was made. The protocol does not (and cannot) physically prevent a party from refusing to honor the outcome — but it provides proof that they committed to it.
 
-The strength of this property depends on the identity mode (see Section 10). Under anonymous participation, the record proves that *some entity* committed, but not *which entity in the real world*. Under authenticated participation, the record ties the commitment to a verified real-world identity. Under self-certified participation, the record ties the commitment to a cryptographic key whose holder cannot plausibly deny involvement.
+The strength of this property depends on the identity mode (see Section 10). Under authenticated participation, the record ties the commitment to a verified real-world identity. Under self-certified participation, the record ties the commitment to a cryptographic key whose holder cannot plausibly deny involvement.
 
 ### Verifiability
 
@@ -367,17 +367,9 @@ The protocol does not require the officiant to be a disinterested third party. I
 
 The core protocol (Sections 1–9) is deliberately silent on how a party's identity is established. It requires that commitments be *authenticated* — tied to a specific party in a way that the party cannot later deny — but does not prescribe the authentication mechanism. This section addresses that gap.
 
-The identity question matters most when a party might deny their commitment after an unfavorable outcome. The protocol needs enough identity assurance that such denial is either impossible or implausible. Different contexts demand different levels of assurance, so the protocol supports three identity modes, chosen at ceremony creation.
+The identity question matters most when a party might deny their commitment after an unfavorable outcome. The protocol needs enough identity assurance that such denial is either impossible or implausible. Different contexts demand different levels of assurance, so the protocol supports two identity modes, chosen at ceremony creation.
 
-### Mode 1: Anonymous
-
-Parties are identified by opaque tokens (e.g., a UUID generated at the time of participation). No real-world identity is attached to the token. This is appropriate when the stakes are low and all parties trust each other — a coin flip between friends, a casual raffle.
-
-**What it proves:** The same token committed and (if applicable) revealed. **What it doesn't prove:** Who the token belongs to. A party can plausibly deny involvement by claiming the token was not theirs.
-
-**Appropriate for:** Low-stakes ceremonies among mutually trusting parties.
-
-### Mode 2: Authenticated
+### Mode 1: Authenticated
 
 Parties prove their identity through a trusted external authority — an OAuth provider (Google, GitHub), an organizational directory, or a physical witness who can vouch for identities. The commitment is tied to the verified identity, and the record shows which real-world identity made each commitment.
 
@@ -385,7 +377,7 @@ Parties prove their identity through a trusted external authority — an OAuth p
 
 **Appropriate for:** Social ceremonies where participants are humans, UX friction should be low, and participants should not need to understand cryptography.
 
-### Mode 3: Self-Certified
+### Mode 2: Self-Certified
 
 Parties identify themselves by cryptographic keypair. No external authority is needed — the ceremony record itself contains all the evidence required to prove participation. This mode adds a **roster acknowledgment** phase between commitment collection and entropy collection.
 
@@ -405,9 +397,9 @@ The record now contains three layers of evidence for each party: (a) their publi
 
 ### Identity Mode as Ceremony Parameter
 
-The identity mode is a ceremony parameter, fixed at creation like all other parameters. Parties can inspect the identity mode before deciding whether to commit. A party who requires strong non-repudiation should not commit to an anonymous ceremony; a party who values privacy should not commit to an authenticated ceremony.
+The identity mode is a ceremony parameter, fixed at creation like all other parameters. Parties can inspect the identity mode before deciding whether to commit.
 
-The choice of identity mode does not affect the entropy methods, the derivation procedure, or the structure of the record. It affects only the authentication mechanism for commitments and (in Mode 3) adds the roster acknowledgment step between Phase 2 and Phase 3.
+The choice of identity mode does not affect the entropy methods, the derivation procedure, or the structure of the record. It affects only the authentication mechanism for commitments and (in Mode 2) adds the roster acknowledgment step between Phase 2 and Phase 3.
 
 ---
 
@@ -463,11 +455,11 @@ The protocol is intentionally minimal. The following extensions are compatible w
 | Outcome | The deterministic result of applying the derivation function to the combined entropy. |
 | Modular Bias | Uneven outcome probabilities caused by mapping entropy onto an outcome space whose size does not evenly divide the entropy space. |
 | Record | The ordered, tamper-evident log of all ceremony events. |
-| Identity Mode | How participant identity is established: anonymous (opaque token), authenticated (external authority), or self-certified (cryptographic keypair). |
+| Identity Mode | How participant identity is established: authenticated (external authority) or self-certified (cryptographic keypair). |
 | Non-Repudiation | The property that a party cannot plausibly deny having committed; its strength depends on the identity mode. |
 | Reveal Deadline | The point by which all participants must reveal their sealed entropy (Methods A and D). |
-| Roster | The ordered list of (party identifier, public key) pairs, published before commitments begin (Mode 3 only). |
-| Roster Acknowledgment | A party's signature over the roster, proving they saw who else was participating and chose to proceed (Mode 3 only). |
+| Roster | The ordered list of (party identifier, public key) pairs, published before commitments begin (Mode 2 only). |
+| Roster Acknowledgment | A party's signature over the roster, proving they saw who else was participating and chose to proceed (Mode 2 only). |
 | Seal | A mechanism that binds a party to a value without revealing it. |
 
 ## Appendix B: Notation for Formal Analysis

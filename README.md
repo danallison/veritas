@@ -9,8 +9,7 @@ The name reflects the core promise: the truth of the outcome is established by t
 A **ceremony** is the unit of social randomness — a complete lifecycle from creation through commitment, entropy collection, resolution, and finalization.
 
 ```
-Anonymous:       Pending → AwaitingReveals → AwaitingBeacon → Resolving → Finalized
-Self-Certified:  Gathering → AwaitingRosterAcks → Pending → ...same
+Gathering → AwaitingRosterAcks → Pending → AwaitingReveals → AwaitingBeacon → Resolving → Finalized
 ```
 
 1. **Creation** — Define parameters: type of random event, number of parties, identity mode, deadline
@@ -31,14 +30,9 @@ Self-Certified:  Gathering → AwaitingRosterAcks → Pending → ...same
 
 ### Participant Identity
 
-Ceremonies support two identity modes, chosen at creation:
+All ceremonies use **self-certified identity**: each participant registers an Ed25519 keypair, signs the roster (proving they saw who else is participating), and signs their commitment. The ceremony record contains three layers of cryptographic evidence per participant — denying involvement requires claiming private key compromise.
 
-| Mode | Registration | Non-Repudiation | Best For |
-|------|-------------|-----------------|----------|
-| **Anonymous** | UUID only | Token-based (weak) | Casual ceremonies, mutual trust |
-| **Self-Certified** | Ed25519 keypair + roster signing | Cryptographic (strong) | AI agents, high-stakes, formal agreements |
-
-Self-certified ceremonies add a registration and roster acknowledgment phase before commitments begin. Each participant registers a public key, signs the full roster (proving they saw who else is participating), and signs their commitment. The ceremony record contains three layers of cryptographic evidence per participant — denying involvement requires claiming private key compromise.
+<!-- TODO: OAuth identity mode planned as a second option -->
 
 ### Critical Invariants
 

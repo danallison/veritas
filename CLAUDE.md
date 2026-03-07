@@ -46,13 +46,11 @@ A **ceremony** is the unit of social randomness — a lifecycle from creation th
 
 ### Ceremony Phases
 
-Anonymous ceremonies: `Pending` → `AwaitingReveals` → `AwaitingBeacon` → `Resolving` → `Finalized`
-
-Self-certified ceremonies: `Gathering` → `AwaitingRosterAcks` → `Pending` → (same as above)
+`Gathering` → `AwaitingRosterAcks` → `Pending` → `AwaitingReveals` → `AwaitingBeacon` → `Resolving` → `Finalized`
 
 Terminal phases: `Expired`, `Cancelled`, `Disputed`
 
-State transitions are pure functions returning either a `TransitionError` or the new phase plus log events. Self-certified ceremonies use `transitionWith` which takes the roster and ack count as additional parameters.
+State transitions are pure functions returning either a `TransitionError` or the new phase plus log events. The `transitionWith` function takes the roster and ack count as additional parameters for the Gathering and AwaitingRosterAcks phases.
 
 ### Entropy Strategies
 
@@ -80,10 +78,9 @@ Every ceremony state transition is recorded in an append-only, hash-chained log.
 
 ### Participant Identity
 
-Ceremonies support two identity modes, chosen at creation:
+All ceremonies use **SelfCertified** identity: each participant registers an Ed25519 public key, signs a roster acknowledgment, and signs their commitment. Ceremonies start in `Gathering` and progress through `AwaitingRosterAcks` before reaching `Pending`. The ceremony record itself constitutes complete cryptographic proof of participation — denying involvement requires claiming private key compromise.
 
-- **Anonymous** (default) — Participants are identified by ephemeral UUIDs. Ceremonies start in `Pending`. Appropriate for low-stakes scenarios with mutual trust.
-- **SelfCertified** — Each participant registers an Ed25519 public key, signs a roster acknowledgment, and signs their commitment. Ceremonies start in `Gathering` and progress through `AwaitingRosterAcks` before reaching `Pending`. The ceremony record itself constitutes complete cryptographic proof of participation — denying involvement requires claiming private key compromise. Designed for AI agent coordination and high-stakes scenarios.
+<!-- TODO: OAuth identity mode planned as a second option -->
 
 Key modules: `Veritas.Crypto.Roster` (backend signing/verification), `web/src/crypto/identity.ts` (frontend Ed25519 keypair management and signing). See `ceremony-protocol.md` Section 10 for the full protocol specification.
 

@@ -6,7 +6,7 @@ import { useCeremonySecrets } from '../hooks/useCeremonySecrets'
 import { commitPayloadHex, describeCommitPayload } from '../crypto/identity'
 import { verifyParamsHash } from '../crypto/ceremonyParams'
 import SigningInstructions from './SigningInstructions'
-import type { EntropyMethod, IdentityMode, CeremonyResponse } from '../api/types'
+import type { EntropyMethod, CeremonyResponse } from '../api/types'
 
 interface PreparedCommit {
   entropy: string | undefined
@@ -15,16 +15,15 @@ interface PreparedCommit {
   payloadDescription: string
 }
 
+// TODO: OAuth mode will use bearer token instead of Ed25519 signature
 export default function CommitForm({
   ceremonyId,
   entropyMethod,
-  identityMode = 'Anonymous',
   ceremony,
   onCommitted,
 }: {
   ceremonyId: string
   entropyMethod: EntropyMethod
-  identityMode?: IdentityMode
   ceremony?: CeremonyResponse
   onCommitted: () => void
 }) {
@@ -37,38 +36,6 @@ export default function CommitForm({
 
   const alreadyCommitted = getSecrets() !== null
   const needsSeal = entropyMethod === 'ParticipantReveal' || entropyMethod === 'Combined'
-  const isSelfCertified = identityMode === 'SelfCertified'
-
-  const handleAnonymousCommit = async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      let entropy_seal: string | undefined
-      let entropy: string | undefined
-      if (needsSeal) {
-        entropy = generateEntropy()
-        const seal = await computeSeal(ceremonyId, participantId, entropy)
-        entropy_seal = seal
-      }
-
-      const trimmedName = localName.trim()
-      if (trimmedName) {
-        setDisplayName(trimmedName)
-      }
-
-      await api.commit(ceremonyId, {
-        participant_id: participantId,
-        entropy_seal,
-        display_name: trimmedName || undefined,
-      })
-      saveSecrets({ entropy, seal: entropy_seal, committed: true })
-      onCommitted()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Commit failed')
-    } finally {
-      setLoading(false)
-    }
-  }
 
   const handlePrepare = async () => {
     setLoading(true)
@@ -160,7 +127,7 @@ export default function CommitForm({
 
       {error && !preparedCommit && <p className="text-red-600 text-sm mb-2">{error}</p>}
 
-      {isSelfCertified && !preparedCommit && (
+      {!preparedCommit && (
         <button
           onClick={handlePrepare}
           disabled={loading}
@@ -170,7 +137,7 @@ export default function CommitForm({
         </button>
       )}
 
-      {isSelfCertified && preparedCommit && (
+      {preparedCommit && (
         <div className="mt-2">
           <p className="text-sm text-gray-600 mb-3">
             Sign the commit payload with your private key and paste the signature below.
@@ -183,16 +150,6 @@ export default function CommitForm({
             error={error}
           />
         </div>
-      )}
-
-      {!isSelfCertified && (
-        <button
-          onClick={handleAnonymousCommit}
-          disabled={loading}
-          className="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-50 transition-colors"
-        >
-          {loading ? 'Committing...' : 'Commit'}
-        </button>
       )}
     </div>
   )

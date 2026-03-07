@@ -182,7 +182,7 @@ export default function VerificationData({
   ceremonyId,
   entropyMethod,
   ceremonyType,
-  identityMode = 'Anonymous',
+  identityMode = 'SelfCertified',
 }: {
   ceremonyId: string
   entropyMethod: EntropyMethod

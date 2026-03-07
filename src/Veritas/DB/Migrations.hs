@@ -28,6 +28,9 @@ runMigrations conn = do
   -- Phase 5: Self-contained ceremony identity
   execute_ conn "ALTER TABLE ceremonies ADD COLUMN IF NOT EXISTS identity_mode TEXT NOT NULL DEFAULT 'anonymous'"
   execute_ conn createCeremonyParticipantsTable
+  -- Phase 6: Remove Anonymous identity mode (security audit finding #1)
+  execute_ conn "UPDATE ceremonies SET identity_mode = 'self_certified' WHERE identity_mode = 'anonymous'"
+  execute_ conn "ALTER TABLE ceremonies ALTER COLUMN identity_mode SET DEFAULT 'self_certified'"
   -- Pool computing tables
   runPoolMigrations conn
   pure ()

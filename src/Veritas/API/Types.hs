@@ -559,7 +559,7 @@ instance ToSchema CreateCeremonyRequest where
       , ("non_participation_policy", mempty & OA.type_ ?~ OA.OpenApiString & OA.description ?~ "DefaultSubstitution | Exclusion | Cancellation")
       , ("beacon_spec", mempty & OA.description ?~ "Beacon source configuration (required for ExternalBeacon/Combined)")
       , ("created_by", mempty & OA.type_ ?~ OA.OpenApiString & OA.format ?~ "uuid" & OA.description ?~ "Participant ID of the creator (generated if omitted)")
-      , ("identity_mode", mempty & OA.type_ ?~ OA.OpenApiString & OA.description ?~ "Anonymous (default) | SelfCertified")
+      , ("identity_mode", mempty & OA.type_ ?~ OA.OpenApiString & OA.description ?~ "SelfCertified (default). TODO: OAuth planned.")
       ]
     & OA.required .~ ["question", "ceremony_type", "entropy_method", "required_parties", "commitment_mode", "commit_deadline"]
 
@@ -597,7 +597,7 @@ instance ToSchema CeremonyResponse where
       , ("reveal_deadline", mempty & OA.type_ ?~ OA.OpenApiString & OA.format ?~ "date-time")
       , ("non_participation_policy", mempty & OA.type_ ?~ OA.OpenApiString)
       , ("beacon_spec", mempty)
-      , ("identity_mode", mempty & OA.type_ ?~ OA.OpenApiString & OA.description ?~ "Anonymous | SelfCertified")
+      , ("identity_mode", mempty & OA.type_ ?~ OA.OpenApiString & OA.description ?~ "SelfCertified")
       , ("phase", mempty & OA.type_ ?~ OA.OpenApiString & OA.description ?~ "Gathering | AwaitingRosterAcks | Pending | AwaitingReveals | AwaitingBeacon | Resolving | Finalized | Expired | Cancelled | Disputed")
       , ("created_by", mempty & OA.type_ ?~ OA.OpenApiString & OA.format ?~ "uuid")
       , ("created_at", mempty & OA.type_ ?~ OA.OpenApiString & OA.format ?~ "date-time")

@@ -15,7 +15,8 @@ export type NonParticipationPolicy =
   | 'Exclusion'
   | 'Cancellation'
 
-export type IdentityMode = 'Anonymous' | 'SelfCertified'
+// TODO: Add 'OAuth' here when OAuth identity mode is implemented
+export type IdentityMode = 'SelfCertified'
 
 export type Phase =
   | 'Gathering'

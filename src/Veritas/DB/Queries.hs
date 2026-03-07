@@ -651,11 +651,10 @@ showNonParticipationPolicy = \case
 
 parseIdentityMode :: Text -> IdentityMode
 parseIdentityMode = \case
-  "anonymous"      -> Anonymous
   "self_certified" -> SelfCertified
+  -- TODO: Add OAuth mode here
   x                -> error ("Unknown identity mode: " <> T.unpack x)
 
 showIdentityMode :: IdentityMode -> Text
 showIdentityMode = \case
-  Anonymous     -> "anonymous"
   SelfCertified -> "self_certified"

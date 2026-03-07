@@ -67,12 +67,8 @@ export default function CeremonyDetailPage() {
           <Dd>{typeDescription}</Dd>
           <Dt>Commitment Mode</Dt>
           <Dd>{ceremony.commitment_mode}</Dd>
-          {ceremony.identity_mode === 'SelfCertified' && (
-            <>
-              <Dt>Identity</Dt>
-              <Dd>Self-Certified</Dd>
-            </>
-          )}
+          <Dt>Identity</Dt>
+          <Dd>Self-Certified</Dd>
           <Dt>Commit Deadline</Dt>
           <Dd>{new Date(ceremony.commit_deadline).toLocaleString()}</Dd>
           {ceremony.reveal_deadline && (
@@ -106,7 +102,7 @@ export default function CeremonyDetailPage() {
       )}
 
       {/* Phase-appropriate action */}
-      {ceremony.phase === 'Gathering' && ceremony.identity_mode === 'SelfCertified' && (
+      {ceremony.phase === 'Gathering' && (
         <JoinForm ceremonyId={id} onJoined={refetch} />
       )}
 
@@ -123,7 +119,6 @@ export default function CeremonyDetailPage() {
         <CommitForm
           ceremonyId={id}
           entropyMethod={ceremony.entropy_method}
-          identityMode={ceremony.identity_mode}
           ceremony={ceremony}
           onCommitted={refetch}
         />

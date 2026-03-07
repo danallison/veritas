@@ -124,10 +124,10 @@ createCeremony AppEnv{..} req = do
   creator <- case crqCreatedBy req of
     Just pid -> pure pid
     Nothing  -> liftIO UUID4.nextRandom
-  let imode = maybe Anonymous id (crqIdentityMode req)
+  let imode = maybe SelfCertified id (crqIdentityMode req)
+      -- TODO: OAuth may start in Pending
       initialPhase = case imode of
         SelfCertified -> Gathering
-        Anonymous     -> Pending
       ceremony = Ceremony
         { ceremonyId = CeremonyId cid
         , question = crqQuestion req
@@ -265,14 +265,12 @@ getCeremonyH AppEnv{..} cid = do
   case mrow of
     Nothing -> throwError err404
     Just row -> do
+      -- TODO: OAuth roster will include OAuth identities
       (count, participants, mRoster) <- liftIO $ withConnection envPool $ \conn -> do
         c <- Q.getCommitmentCount conn (CeremonyId cid)
         ps <- Q.getCommittedParticipants conn (CeremonyId cid)
-        roster <- if Q.crIdentityMode row == "self_certified"
-          then do
-            prows <- Q.getCeremonyParticipants conn (CeremonyId cid)
-            pure $ Just (map participantRowToRosterEntry prows)
-          else pure Nothing
+        prows <- Q.getCeremonyParticipants conn (CeremonyId cid)
+        let roster = Just (map participantRowToRosterEntry prows)
         pure (c, ps, roster)
       pure $ ceremonyRowToResponse row count participants mRoster
 
@@ -314,24 +312,21 @@ commitToCeremony AppEnv{..} cid req = do
             Right sealBytes -> do
               commitments <- map Q.commitmentRowToDomain <$> Q.getCommitments conn' (CeremonyId cid)
 
-              -- For self-certified ceremonies, verify the commit signature
-              case identityMode ceremony of
-                SelfCertified -> do
-                  case cmrqSignature req of
-                    Nothing -> pure (Left $ err400 { errBody = "signature is required for self-certified ceremonies" })
-                    Just sigHex -> case hexDecode sigHex of
-                      Nothing -> pure (Left $ err400 { errBody = "invalid hex in signature" })
-                      Just sig -> do
-                        mpk <- Q.getParticipantPublicKey conn' (CeremonyId cid) pid
-                        case mpk of
-                          Nothing -> pure (Left $ err400 { errBody = LBS.fromStrict (BS8.pack (show (NotJoined pid))) })
-                          Just pk -> do
-                            let paramsHash = computeParamsHash ceremony
-                            if not (verifyCommitSignature pk sig (CeremonyId cid) pid paramsHash sealBytes)
-                              then pure (Left $ err400 { errBody = "invalid commit signature" })
-                              else doCommit conn' ceremony commitments pid sealBytes now
-                Anonymous ->
-                  doCommit conn' ceremony commitments pid sealBytes now
+              -- Verify the commit signature
+              -- TODO: OAuth commits will use bearer token validation instead of Ed25519 signature
+              case cmrqSignature req of
+                Nothing -> pure (Left $ err400 { errBody = "signature is required" })
+                Just sigHex -> case hexDecode sigHex of
+                  Nothing -> pure (Left $ err400 { errBody = "invalid hex in signature" })
+                  Just sig -> do
+                    mpk <- Q.getParticipantPublicKey conn' (CeremonyId cid) pid
+                    case mpk of
+                      Nothing -> pure (Left $ err400 { errBody = LBS.fromStrict (BS8.pack (show (NotJoined pid))) })
+                      Just pk -> do
+                        let paramsHash = computeParamsHash ceremony
+                        if not (verifyCommitSignature pk sig (CeremonyId cid) pid paramsHash sealBytes)
+                          then pure (Left $ err400 { errBody = "invalid commit signature" })
+                          else doCommit conn' ceremony commitments pid sealBytes now
 
   case result of
     Left err -> throwError err
@@ -530,39 +525,36 @@ joinCeremony AppEnv{..} cid req = do
           let ceremony = Q.ceremonyRowToDomain row
               pid = ParticipantId (jrqParticipantId req)
 
-          -- Must be self-certified
-          case identityMode ceremony of
-            Anonymous -> pure (Left $ err400 { errBody = "ceremony is not self-certified" })
-            SelfCertified -> do
-              -- Validate public key
-              case hexDecode (jrqPublicKey req) of
-                Nothing -> pure (Left $ err400 { errBody = "invalid hex in public_key" })
-                Just pkBytes
-                  | BS.length pkBytes /= 32 ->
-                      pure (Left $ err400 { errBody = "public_key must be 32 bytes (Ed25519)" })
-                  | otherwise -> do
-                      -- Get existing roster
-                      prows <- Q.getCeremonyParticipants conn' (CeremonyId cid)
-                      let roster = Q.participantRowsToRoster prows
-                          reg = ParticipantRegistration
-                            { prCeremony = CeremonyId cid
-                            , prParticipant = pid
-                            , prPublicKey = pkBytes
-                            , prDisplayName = jrqDisplayName req
-                            , prJoinedAt = now
-                            }
-                          ackCount = length [() | p <- prows, Q.cprRosterSig p /= Nothing]
+          -- TODO: OAuth join will use bearer token
+          -- Validate public key
+          case hexDecode (jrqPublicKey req) of
+            Nothing -> pure (Left $ err400 { errBody = "invalid hex in public_key" })
+            Just pkBytes
+              | BS.length pkBytes /= 32 ->
+                  pure (Left $ err400 { errBody = "public_key must be 32 bytes (Ed25519)" })
+              | otherwise -> do
+                  -- Get existing roster
+                  prows <- Q.getCeremonyParticipants conn' (CeremonyId cid)
+                  let roster = Q.participantRowsToRoster prows
+                      reg = ParticipantRegistration
+                        { prCeremony = CeremonyId cid
+                        , prParticipant = pid
+                        , prPublicKey = pkBytes
+                        , prDisplayName = jrqDisplayName req
+                        , prJoinedAt = now
+                        }
+                      ackCount = length [() | p <- prows, Q.cprRosterSig p /= Nothing]
 
-                      case transitionWith roster ackCount ceremony [] [] (RegisterParticipant reg) of
-                        Left err -> pure (Left $ err400 { errBody = LBS.fromStrict (BS8.pack (show err)) })
-                        Right TransitionResult{..} -> do
-                          Q.insertCeremonyParticipant conn' (CeremonyId cid) pid pkBytes (jrqDisplayName req) now
-                          Q.updateCeremonyPhase conn' (CeremonyId cid) trNewPhase
-                          mapM_ (Q.appendAuditLog conn' (CeremonyId cid)) trEvents
-                          pure (Right $ JoinResponse
-                            { jrStatus = "joined"
-                            , jrPhase = trNewPhase
-                            })
+                  case transitionWith roster ackCount ceremony [] [] (RegisterParticipant reg) of
+                    Left err -> pure (Left $ err400 { errBody = LBS.fromStrict (BS8.pack (show err)) })
+                    Right TransitionResult{..} -> do
+                      Q.insertCeremonyParticipant conn' (CeremonyId cid) pid pkBytes (jrqDisplayName req) now
+                      Q.updateCeremonyPhase conn' (CeremonyId cid) trNewPhase
+                      mapM_ (Q.appendAuditLog conn' (CeremonyId cid)) trEvents
+                      pure (Right $ JoinResponse
+                        { jrStatus = "joined"
+                        , jrPhase = trNewPhase
+                        })
 
   case result of
     Left err -> throwError err

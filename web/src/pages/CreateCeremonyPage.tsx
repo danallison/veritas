@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import { useParticipant } from '../hooks/useParticipant'
 import { numberToRational } from '../api/types'
-import type { EntropyMethod, CommitmentMode, NonParticipationPolicy, CeremonyType, BeaconSpec, IdentityMode } from '../api/types'
+import type { EntropyMethod, CommitmentMode, NonParticipationPolicy, CeremonyType, BeaconSpec } from '../api/types'
 
 export default function CreateCeremonyPage() {
   const navigate = useNavigate()
@@ -28,7 +28,6 @@ export default function CreateCeremonyPage() {
   const [deadlineMinutes, setDeadlineMinutes] = useState(60)
   const [revealMinutes, setRevealMinutes] = useState(30)
   const [nonPartPolicy, setNonPartPolicy] = useState<NonParticipationPolicy>('Exclusion')
-  const [identityMode, setIdentityMode] = useState<IdentityMode>('Anonymous')
   const [beaconNetwork, setBeaconNetwork] = useState('default')
 
   const needsRevealParams = method === 'ParticipantReveal' || method === 'Combined'
@@ -122,7 +121,7 @@ export default function CreateCeremonyPage() {
         non_participation_policy: needsRevealParams ? nonPartPolicy : undefined,
         beacon_spec: beaconSpec,
         created_by: participantId,
-        identity_mode: identityMode !== 'Anonymous' ? identityMode : undefined,
+        identity_mode: 'SelfCertified',
       })
       navigate(`/ceremonies/${ceremony.id}`)
     } catch (e) {
@@ -247,13 +246,6 @@ export default function CreateCeremonyPage() {
             <option value="ExternalBeacon">External Beacon (drand)</option>
             <option value="ParticipantReveal">Participant Reveal (highest trust)</option>
             <option value="Combined">Combined (recommended)</option>
-          </select>
-        </Field>
-
-        <Field label="Identity mode">
-          <select value={identityMode} onChange={(e) => setIdentityMode(e.target.value as IdentityMode)} className="input">
-            <option value="Anonymous">Anonymous (default)</option>
-            <option value="SelfCertified">Self-Certified (cryptographic identity)</option>
           </select>
         </Field>
 

@@ -32,15 +32,31 @@ spec = aroundAll withTestApp $ beforeWith cleanDB $ do
       req <- mkVRFCeremonyReq 2
       resp <- testPost (ieApp env) "/ceremonies" req
       ceremony <- decodeBody resp :: IO CeremonyResponse
-      let cidPath = "/ceremonies/" <> uuidToPath (crspId ceremony)
+      let cid = crspId ceremony
+          cidPath = "/ceremonies/" <> uuidToPath cid
 
-      pid <- UUID4.nextRandom
+      -- Join two participants
+      tp1 <- mkTestParticipant
+      tp2 <- mkTestParticipant
+      _ <- testPost (ieApp env) (cidPath <> "/join") (mkJoinRequest tp1)
+      _ <- testPost (ieApp env) (cidPath <> "/join") (mkJoinRequest tp2)
+
+      -- Ack roster
+      cerResp1 <- testGet (ieApp env) cidPath
+      cerState1 <- decodeBody cerResp1 :: IO CeremonyResponse
+      _ <- testPost (ieApp env) (cidPath <> "/ack-roster") (mkAckRosterRequest cid cerState1 tp1)
+      _ <- testPost (ieApp env) (cidPath <> "/ack-roster") (mkAckRosterRequest cid cerState1 tp2)
+
+      -- GET ceremony for commit signing
+      cerResp2 <- testGet (ieApp env) cidPath
+      cerState2 <- decodeBody cerResp2 :: IO CeremonyResponse
+
       -- First commit succeeds
-      resp1 <- testPost (ieApp env) (cidPath <> "/commit") (mkCommitRequest pid)
+      resp1 <- testPost (ieApp env) (cidPath <> "/commit") (mkSignedCommitRequest cid cerState2 tp1)
       statusCode (simpleStatus resp1) `shouldBe` 200
 
       -- Duplicate commit returns 400
-      resp2 <- testPost (ieApp env) (cidPath <> "/commit") (mkCommitRequest pid)
+      resp2 <- testPost (ieApp env) (cidPath <> "/commit") (mkSignedCommitRequest cid cerState2 tp1)
       statusCode (simpleStatus resp2) `shouldBe` 400
 
     it "commit after ceremony leaves Pending returns 400" $ \env -> do
@@ -48,12 +64,20 @@ spec = aroundAll withTestApp $ beforeWith cleanDB $ do
       req <- mkVRFCeremonyReq 1
       resp <- testPost (ieApp env) "/ceremonies" req
       ceremony <- decodeBody resp :: IO CeremonyResponse
-      let cidPath = "/ceremonies/" <> uuidToPath (crspId ceremony)
+      let cid = crspId ceremony
+          cidPath = "/ceremonies/" <> uuidToPath cid
 
-      pid1 <- UUID4.nextRandom
-      _ <- testPost (ieApp env) (cidPath <> "/commit") (mkCommitRequest pid1)
+      -- Join, ack, commit to finalize
+      tp <- mkTestParticipant
+      _ <- testPost (ieApp env) (cidPath <> "/join") (mkJoinRequest tp)
+      cerResp1 <- testGet (ieApp env) cidPath
+      cerState1 <- decodeBody cerResp1 :: IO CeremonyResponse
+      _ <- testPost (ieApp env) (cidPath <> "/ack-roster") (mkAckRosterRequest cid cerState1 tp)
+      cerResp2 <- testGet (ieApp env) cidPath
+      cerState2 <- decodeBody cerResp2 :: IO CeremonyResponse
+      _ <- testPost (ieApp env) (cidPath <> "/commit") (mkSignedCommitRequest cid cerState2 tp)
 
-      -- Ceremony is now Finalized; trying to commit should fail
+      -- Ceremony is now Finalized; trying to commit with unsigned request should fail
       pid2 <- UUID4.nextRandom
       resp2 <- testPost (ieApp env) (cidPath <> "/commit") (mkCommitRequest pid2)
       statusCode (simpleStatus resp2) `shouldBe` 400
@@ -65,15 +89,26 @@ spec = aroundAll withTestApp $ beforeWith cleanDB $ do
       let cid = crspId ceremony
           cidPath = "/ceremonies/" <> uuidToPath cid
 
-      pid1 <- UUID4.nextRandom
-      pid2 <- UUID4.nextRandom
+      -- Join two participants
+      tp1 <- mkTestParticipant
+      tp2 <- mkTestParticipant
+      _ <- testPost (ieApp env) (cidPath <> "/join") (mkJoinRequest tp1)
+      _ <- testPost (ieApp env) (cidPath <> "/join") (mkJoinRequest tp2)
 
-      -- Commit both
-      _ <- testPost (ieApp env) (cidPath <> "/commit") (mkCommitRequestWithSeal cid pid1 1)
-      _ <- testPost (ieApp env) (cidPath <> "/commit") (mkCommitRequestWithSeal cid pid2 2)
+      -- Ack roster
+      cerResp1 <- testGet (ieApp env) cidPath
+      cerState1 <- decodeBody cerResp1 :: IO CeremonyResponse
+      _ <- testPost (ieApp env) (cidPath <> "/ack-roster") (mkAckRosterRequest cid cerState1 tp1)
+      _ <- testPost (ieApp env) (cidPath <> "/ack-roster") (mkAckRosterRequest cid cerState1 tp2)
+
+      -- Commit both with seals
+      cerResp2 <- testGet (ieApp env) cidPath
+      cerState2 <- decodeBody cerResp2 :: IO CeremonyResponse
+      _ <- testPost (ieApp env) (cidPath <> "/commit") (mkSignedCommitRequestWithSeal cid cerState2 tp1 1)
+      _ <- testPost (ieApp env) (cidPath <> "/commit") (mkSignedCommitRequestWithSeal cid cerState2 tp2 2)
 
       -- Reveal with wrong entropy (idx=99 instead of 1)
-      resp2 <- testPost (ieApp env) (cidPath <> "/reveal") (mkRevealRequest pid1 99)
+      resp2 <- testPost (ieApp env) (cidPath <> "/reveal") (mkRevealRequest (tpId tp1) 99)
       statusCode (simpleStatus resp2) `shouldBe` 400
 
     it "outcome on non-finalized ceremony returns 400" $ \env -> do
@@ -82,7 +117,7 @@ spec = aroundAll withTestApp $ beforeWith cleanDB $ do
       ceremony <- decodeBody resp :: IO CeremonyResponse
       let cidPath = "/ceremonies/" <> uuidToPath (crspId ceremony)
 
-      -- Ceremony is still Pending (needs 2 commits)
+      -- Ceremony is in Gathering (needs 2 participants)
       outcomeResp <- testGet (ieApp env) (cidPath <> "/outcome")
       statusCode (simpleStatus outcomeResp) `shouldBe` 400
 
@@ -107,12 +142,23 @@ spec = aroundAll withTestApp $ beforeWith cleanDB $ do
       let cid = crspId ceremony
           cidPath = "/ceremonies/" <> uuidToPath cid
 
-      pid1 <- UUID4.nextRandom
-      pid2 <- UUID4.nextRandom
+      -- Join two participants
+      tp1 <- mkTestParticipant
+      tp2 <- mkTestParticipant
+      _ <- testPost (ieApp env) (cidPath <> "/join") (mkJoinRequest tp1)
+      _ <- testPost (ieApp env) (cidPath <> "/join") (mkJoinRequest tp2)
+
+      -- Ack roster
+      cerResp1 <- testGet (ieApp env) cidPath
+      cerState1 <- decodeBody cerResp1 :: IO CeremonyResponse
+      _ <- testPost (ieApp env) (cidPath <> "/ack-roster") (mkAckRosterRequest cid cerState1 tp1)
+      _ <- testPost (ieApp env) (cidPath <> "/ack-roster") (mkAckRosterRequest cid cerState1 tp2)
 
       -- Commit both to transition to AwaitingReveals
-      _ <- testPost (ieApp env) (cidPath <> "/commit") (mkCommitRequestWithSeal cid pid1 1)
-      _ <- testPost (ieApp env) (cidPath <> "/commit") (mkCommitRequestWithSeal cid pid2 2)
+      cerResp2 <- testGet (ieApp env) cidPath
+      cerState2 <- decodeBody cerResp2 :: IO CeremonyResponse
+      _ <- testPost (ieApp env) (cidPath <> "/commit") (mkSignedCommitRequestWithSeal cid cerState2 tp1 1)
+      _ <- testPost (ieApp env) (cidPath <> "/commit") (mkSignedCommitRequestWithSeal cid cerState2 tp2 2)
 
       -- Try to reveal with an uncommitted participant
       unknownPid <- UUID4.nextRandom

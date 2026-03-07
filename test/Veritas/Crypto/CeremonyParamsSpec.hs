@@ -21,7 +21,7 @@ baseCeremony = Ceremony
   , revealDeadline = Nothing
   , nonParticipationPolicy = Nothing
   , beaconSpec = Nothing
-  , identityMode = Anonymous
+  , identityMode = SelfCertified
   , phase = Pending
   , createdBy = ParticipantId UUID.nil
   , createdAt = read "2026-01-01 00:00:00 UTC"
@@ -60,11 +60,6 @@ spec = do
             c2 = baseCeremony { ceremonyType = CoinFlip "Alice wins" "Bob wins" }
         computeParamsHash c1 `shouldNotBe` computeParamsHash c2
 
-      it "different identity modes -> different hashes" $ do
-        let c1 = baseCeremony { identityMode = Anonymous }
-            c2 = baseCeremony { identityMode = SelfCertified }
-        computeParamsHash c1 `shouldNotBe` computeParamsHash c2
-
       it "does not depend on mutable fields (phase, ceremonyId, createdBy, createdAt)" $ do
         let c1 = baseCeremony
             c2 = baseCeremony
@@ -84,4 +79,4 @@ spec = do
       -- in web/src/crypto/ceremonyParams.test.ts
       it "produces the expected golden hash for baseCeremony" $ do
         let hex = paramsHashHex baseCeremony
-        T.unpack hex `shouldBe` "c22d9d86ddcbd47e28a8071cfbf796757b2b5e3c80665843a42f61f6a0949a46"
+        T.unpack hex `shouldBe` "cf082b4901fa9040b8be96fc45586d3b0a7eaecca8c9400b30958a0238a63f78"
