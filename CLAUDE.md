@@ -4,9 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Veritas is a verifiable social randomness service built in Haskell. It provides cryptographically verifiable, tamper-evident randomness for scenarios where multiple parties need to trust a random outcome (raffles, coin tosses, draft orders, random assignments). Fairness is guaranteed through commitment schemes, an append-only hash-chained audit log, and optional external randomness beacons (drand).
+Veritas is a platform for **verified AI agent output through independent cross-validation**, built in Haskell. It ensures AI outputs can be trusted by having multiple independent agents reproduce computations and comparing results via cryptographic commitment schemes.
 
-The full design and roadmap are documented in `randomness-service-design.md`.
+Two foundational primitives:
+1. **Ceremony** — A cryptographic protocol ensuring fairness through commit-reveal schemes and tamper-evident audit logs. Ensures no validator can copy another's work.
+2. **Volunteer Pool** — A collection of agents (human or AI) who commit to performing a task if randomly selected. Selection uses verifiable randomness (drand). Cross-validation is the primary use case, but pools are general-purpose.
+
+The pivot plan is documented in `PIVOT.md`. Legacy design docs: `randomness-service-design.md`, `ceremony-protocol.md`, `common-pool-computing.md`.
 
 ## Tech Stack
 
@@ -40,9 +44,38 @@ The `dev` service mounts the source directory and has cabal caches. Its entrypoi
 
 ## Architecture
 
-### Core Abstraction: Ceremony
+### New Core Modules (Verification Pivot)
 
-A **ceremony** is the unit of social randomness — a lifecycle from creation through commitment, entropy collection, resolution, and finalization. The ceremony state machine (`src/Veritas/Core/StateMachine.hs`) enforces that commitments are collected *before* any entropy is revealed.
+- `src/Veritas/Core/Pool.hs` — **Volunteer Pool** primitive: member management, status lifecycle, capability filtering
+- `src/Veritas/Core/TaskAssignment.hs` — Task posting and verifiable random volunteer selection (uses drand via `Pool.Selection`)
+- `src/Veritas/Core/Verification.hs` — Cross-validation protocol: submission collection, verdict computation (Unanimous/Majority/Inconclusive)
+- `src/Veritas/Core/VerifiedCache.hs` — Content-addressed cache of verified results, immutable entries, TTL expiration
+
+### Existing Core Modules (Ceremony Infrastructure)
+
+- `src/Veritas/Core/Types.hs` — Ceremony types, phases, entropy methods, audit events
+- `src/Veritas/Core/StateMachine.hs` — Ceremony state machine (pure transitions)
+- `src/Veritas/Core/Resolution.hs` — Deterministic outcome derivation
+- `src/Veritas/Core/Entropy.hs` — Entropy combination logic
+- `src/Veritas/Core/AuditLog.hs` — Hash-chained tamper-evident audit log
+
+### Pool Computing Modules (Being Refactored)
+
+- `src/Veritas/Pool/Types.hs` — Pool/agent/validation types (being generalized)
+- `src/Veritas/Pool/Selection.hs` — Stratified drand-based validator selection
+- `src/Veritas/Pool/Seal.hs` — Commit-reveal seal construction/verification
+- `src/Veritas/Pool/Comparison.hs` — Result comparison (exact, canonical, field-level)
+- `src/Veritas/Pool/StateMachine.hs` — Validation round state machine
+
+### Supporting Modules
+
+- `src/Veritas/Crypto/` — Hash, Ed25519 signatures, commit-reveal, VRF, BLS, roster signing
+- `src/Veritas/API/` — Servant API type definition, handlers, rate limiting
+- `src/Veritas/DB/` — PostgreSQL queries, connection pool, migrations
+- `src/Veritas/External/` — drand beacon client
+- `src/Veritas/Workers/` — Background workers (expiry, auto-resolver, beacon fetcher, reveal deadline)
+- `web/src/` — React frontend (pages, components, API client, hooks, Ed25519 client crypto)
+- `test/Properties/` — QuickCheck property tests
 
 ### Ceremony Phases
 
@@ -50,44 +83,20 @@ A **ceremony** is the unit of social randomness — a lifecycle from creation th
 
 Terminal phases: `Expired`, `Cancelled`, `Disputed`
 
-State transitions are pure functions returning either a `TransitionError` or the new phase plus log events. The `transitionWith` function takes the roster and ack count as additional parameters for the Gathering and AwaitingRosterAcks phases.
+### Verification Flow
 
-### Entropy Strategies
-
-Four strategies, configurable per ceremony:
-1. **ParticipantReveal** — commit-reveal scheme, highest trust, no single party controls outcome
-2. **ExternalBeacon** — drand integration, simplest UX
-3. **Combined** — participant entropy XOR'd with beacon (recommended default)
-4. **OfficiantVRF** — server-generated randomness, lowest friction, requires server trust
-
-### Key Modules
-
-- `src/Veritas/Core/` — Ceremony state machine, types, commitment logic, entropy, audit log
-- `src/Veritas/Crypto/` — Hash utilities, Ed25519 signatures, commit-reveal, VRF, roster signing
-- `src/Veritas/API/` — Servant API type definition, handlers, auth, rate limiting
-- `src/Veritas/DB/` — PostgreSQL queries, connection pool, migrations
-- `src/Veritas/External/` — drand beacon client
-- `src/Veritas/Workers/` — Background workers (expiry, auto-resolver, beacon fetcher, reveal deadline)
-- `src/Veritas/Logging.hs` — Katip structured logging
-- `web/src/` — React frontend (pages, components, API client, hooks, Ed25519 client crypto)
-- `test/Properties/` — QuickCheck property tests (entropy uniformity, state machine validity, deterministic outcomes)
-
-### Audit Log
-
-Every ceremony state transition is recorded in an append-only, hash-chained log. Each entry contains the previous entry's hash, forming a tamper-evident chain.
-
-### Participant Identity
-
-All ceremonies use **SelfCertified** identity: each participant registers an Ed25519 public key, signs a roster acknowledgment, and signs their commitment. Ceremonies start in `Gathering` and progress through `AwaitingRosterAcks` before reaching `Pending`. The ceremony record itself constitutes complete cryptographic proof of participation — denying involvement requires claiming private key compromise.
-
-<!-- TODO: OAuth identity mode planned as a second option -->
-
-Key modules: `Veritas.Crypto.Roster` (backend signing/verification), `web/src/crypto/identity.ts` (frontend Ed25519 keypair management and signing). See `ceremony-protocol.md` Section 10 for the full protocol specification.
+1. **Pool** — Agents register with capabilities and Ed25519 identity
+2. **Task Assignment** — drand beacon selects random subset of volunteers
+3. **Verification Round** — Submitter + validators independently produce results
+4. **Commit-Reveal** — All results sealed before any are revealed (prevents copying)
+5. **Verdict** — Compare results: Unanimous (all agree), Majority (2/3), Inconclusive
+6. **Cache** — Verified results cached by content-addressed fingerprint (immutable)
 
 ## Critical Invariants
 
-- **No entropy visible before all commitments are in.** The state machine must enforce this.
-- **Outcome derivation is deterministic.** Same entropy must always produce the same outcome (pure functions, deterministic ordering by ParticipantId).
+- **No results visible before all submissions are in.** Commit-reveal ensures independence.
+- **Volunteer selection is verifiable.** drand beacon + deterministic shuffle = anyone can verify the selection was fair.
+- **Outcome derivation is deterministic.** Same entropy must always produce the same outcome.
 - **Audit log entries are hash-chained.** `entry_hash = SHA-256(sequence || ceremony_id || event || timestamp || prev_hash)`.
-- **Commitments are cryptographically binding.** `commitment_hash = SHA-256(ceremony_id || participant_id || nonce)`.
-- **Self-certified identity is non-repudiable.** The audit log contains the participant's public key, their roster signature, and their signed commitment — three layers of cryptographic evidence recorded in the tamper-evident hash chain.
+- **Cache entries are immutable.** Once verified, a result cannot be overwritten. Removal only through TTL or challenge.
+- **Self-certified identity is non-repudiable.** Ed25519 signatures throughout.

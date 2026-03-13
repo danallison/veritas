@@ -17,6 +17,7 @@ import qualified Properties.ResolutionProperties
 import qualified Properties.AuditLogProperties
 import qualified Properties.CommitRevealProperties
 import qualified Properties.StatisticalProperties
+import qualified Properties.PoolProperties
 import qualified Veritas.API.HandlersSpec
 import qualified Veritas.DB.QueriesSpec
 import qualified Veritas.Workers.BeaconFetcherSpec
@@ -24,6 +25,11 @@ import qualified Integration.LifecycleSpec
 import qualified Integration.ErrorSpec
 import qualified Integration.AuditLogSpec
 import qualified Integration.StandaloneSpec
+import qualified Veritas.Core.PoolSpec
+import qualified Veritas.Core.TaskAssignmentSpec
+import qualified Veritas.Core.VerificationSpec
+import qualified Veritas.Core.VerifiedCacheSpec
+import qualified Veritas.Core.VerificationFlowSpec
 import qualified Veritas.Pool.SealSpec
 import qualified Veritas.Pool.SelectionSpec
 import qualified Veritas.Pool.ComparisonSpec
@@ -46,6 +52,7 @@ main = hspec $ do
   describe "Properties.AuditLog" Properties.AuditLogProperties.spec
   describe "Properties.CommitReveal" Properties.CommitRevealProperties.spec
   describe "Properties.Statistical" Properties.StatisticalProperties.spec
+  describe "Properties.Pool" Properties.PoolProperties.spec
   describe "API.Handlers" Veritas.API.HandlersSpec.spec
   describe "DB.Queries" Veritas.DB.QueriesSpec.spec
   describe "Workers.BeaconFetcher" Veritas.Workers.BeaconFetcherSpec.spec
@@ -53,6 +60,11 @@ main = hspec $ do
   describe "Integration.ErrorCases" Integration.ErrorSpec.spec
   describe "Integration.AuditLog" Integration.AuditLogSpec.spec
   describe "Integration.Standalone" Integration.StandaloneSpec.spec
+  describe "Core.Pool" Veritas.Core.PoolSpec.spec
+  describe "Core.TaskAssignment" Veritas.Core.TaskAssignmentSpec.spec
+  describe "Core.Verification" Veritas.Core.VerificationSpec.spec
+  describe "Core.VerifiedCache" Veritas.Core.VerifiedCacheSpec.spec
+  describe "Core.VerificationFlow" Veritas.Core.VerificationFlowSpec.spec
   describe "Pool.Seal" Veritas.Pool.SealSpec.spec
   describe "Pool.Selection" Veritas.Pool.SelectionSpec.spec
   describe "Pool.Comparison" Veritas.Pool.ComparisonSpec.spec

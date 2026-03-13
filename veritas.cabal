@@ -66,6 +66,10 @@ library
     Veritas.Core.Resolution
     Veritas.Core.Entropy
     Veritas.Core.AuditLog
+    Veritas.Core.Pool
+    Veritas.Core.TaskAssignment
+    Veritas.Core.Verification
+    Veritas.Core.VerifiedCache
     Veritas.Crypto.Hash
     Veritas.Crypto.Signatures
     Veritas.Crypto.CommitReveal
@@ -144,6 +148,7 @@ test-suite veritas-tests
     Properties.AuditLogProperties
     Properties.CommitRevealProperties
     Properties.StatisticalProperties
+    Properties.PoolProperties
     Veritas.API.HandlersSpec
     Veritas.DB.QueriesSpec
     Veritas.Workers.BeaconFetcherSpec
@@ -154,6 +159,11 @@ test-suite veritas-tests
     Integration.ErrorSpec
     Integration.AuditLogSpec
     Integration.StandaloneSpec
+    Veritas.Core.PoolSpec
+    Veritas.Core.TaskAssignmentSpec
+    Veritas.Core.VerificationSpec
+    Veritas.Core.VerifiedCacheSpec
+    Veritas.Core.VerificationFlowSpec
     Veritas.Pool.SealSpec
     Veritas.Pool.SelectionSpec
     Veritas.Pool.ComparisonSpec
