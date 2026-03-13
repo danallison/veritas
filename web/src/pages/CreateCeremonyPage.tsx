@@ -123,7 +123,7 @@ export default function CreateCeremonyPage() {
         created_by: participantId,
         identity_mode: 'SelfCertified',
       })
-      navigate(`/ceremonies/${ceremony.id}`)
+      navigate(`/advanced/ceremonies/${ceremony.id}`)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to create ceremony')
     } finally {
