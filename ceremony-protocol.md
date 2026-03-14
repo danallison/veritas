@@ -439,6 +439,43 @@ The protocol is intentionally minimal. The following extensions are compatible w
 
 ---
 
+## 13. Verification Ceremonies
+
+The Ceremony Protocol can be applied to **cross-validation of AI agent outputs**. In this application, the ceremony's purpose shifts from "produce a trusted random outcome" to "ensure independent reproduction of a computation." The protocol machinery — commit-reveal, temporal ordering, tamper-evident records — serves the same function: preventing any participant from seeing others' work before committing their own.
+
+### Verification as a Ceremony
+
+A verification ceremony is a standard ceremony with the following specializations:
+
+- **Question:** "Does independent reproduction of computation X produce the same result?"
+- **Outcome type:** Verdict — Unanimous (all agree), Majority (2/3+ agree), or Inconclusive (no agreement).
+- **Parties:** A submitter (who claims a result) and N validators (randomly selected from a volunteer pool).
+- **Entropy method:** Not applicable in the traditional sense — the "entropy" is each participant's independently computed result. However, the commit-reveal structure (Method A) is used to ensure independence: each party seals their result before any are revealed.
+- **Identity mode:** Self-certified (Ed25519). Agents identify by cryptographic keypair.
+
+### How It Maps
+
+| Ceremony Concept | Verification Application |
+|-----------------|--------------------------|
+| Commitment | Submitting a sealed computation result |
+| Entropy contribution | The independently computed result itself |
+| Seal | SHA-256 hash of (fingerprint, agent_id, result, nonce) |
+| Reveal | Disclosing result + nonce after all seals are collected |
+| Outcome derivation | Comparing revealed results to determine verdict |
+| Record | Audit trail of the verification round |
+
+### Key Difference: Outcome Is Not Random
+
+In a standard ceremony, the outcome is derived from combined entropy and is unpredictable by design. In a verification ceremony, the *desired* outcome is that all parties produce the *same* result — unpredictability would indicate a problem (non-deterministic computation, errors, or fabrication).
+
+The ceremony protocol's value here is not in producing randomness but in enforcing the **Entropy Ordering Invariant**: no party sees others' results before committing their own. This is exactly the property needed to ensure that agreement is genuine (independently arrived at) rather than manufactured (copied).
+
+### Validator Selection
+
+Validator selection uses a separate application of verifiable randomness: a drand beacon round determines which pool members are chosen. This is a standard Method B external-source application — the beacon output is not yet known when the submitter commits their result, so the submitter cannot predict (and therefore cannot pre-compromise) the validators.
+
+---
+
 ## Appendix A: Glossary
 
 | Term | Definition |

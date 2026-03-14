@@ -395,14 +395,14 @@ Fixed Docker infrastructure issues discovered during integration testing.
 4. ✅ Updated `docker-compose.yml`: app service mounts source + cabal volumes for fast iteration
 5. ✅ Diagnosed and resolved Docker Desktop containerd zombie process blocking all new containers
 
-### Phase 5: Documentation & Polish
-1. Rewrite README.md
-2. Update CLAUDE.md
-3. Write new design doc (or rewrite randomness-service-design.md)
-4. Split common-pool-computing.md into pool + verification docs
-5. Update SECURITY.md threat model
-6. Update OpenAPI docs
-7. Update ceremony-protocol.md with verification ceremony section
+### Phase 5: Documentation & Polish — DONE ✓
+1. ✅ Rewrite README.md — New verification-centric pitch, updated project structure, API tables, test counts
+2. ✅ Update CLAUDE.md — Added API module details (VerificationTypes, VerificationHandlers), DB module details
+3. ✅ Add pivot context to randomness-service-design.md — Header note pointing to pivot plan and new docs
+4. ✅ Add pivot context to common-pool-computing.md — Header note explaining implementation status and Phase 6 items
+5. ✅ Update SECURITY.md threat model — Added 4 verification-specific threats (V1-V4): colluding validators, result fabrication, small pool cache poisoning, replay/grinding
+6. ⬚ Update OpenAPI docs — ToSchema instances needed for VerificationTypes.hs (deferred: requires Haskell changes + Docker build)
+7. ✅ Update ceremony-protocol.md — Added Section 13: Verification Ceremonies (how ceremony protocol maps to cross-validation)
 
 ### Phase 6: Advanced Features (Future)
 - Reputation system (track validator reliability)

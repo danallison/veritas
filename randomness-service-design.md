@@ -1,5 +1,7 @@
 # Veritas: A Verifiable Social Randomness Service
 
+> **Note (March 2026):** Veritas has pivoted from "verifiable social randomness" to "verified AI output through independent cross-validation." The ceremony infrastructure described in this document remains accurate and in use — it now serves as the commit-reveal foundation for verification rounds. See [PIVOT.md](PIVOT.md) for the pivot plan and [common-pool-computing.md](common-pool-computing.md) for the cross-validation protocol built on top of this infrastructure.
+
 ## Overview
 
 Veritas is a Haskell application that provides verifiable, tamper-evident randomness utilities with a focus on **social randomness** — scenarios where multiple parties need to commit to accepting the outcome of a random event before it occurs. The system guarantees fairness through cryptographic commitment schemes, an append-only audit log, and optional integration with external randomness beacons.

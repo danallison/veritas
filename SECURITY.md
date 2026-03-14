@@ -1,6 +1,6 @@
 # Security Audit
 
-Last updated: 2026-02-26
+Last updated: 2026-03-13
 
 ## Summary
 
@@ -103,6 +103,55 @@ Prism.js syntax-highlighted output is rendered as raw HTML. The interpolated val
 ~~No exclusions for `.env`, `*.pem`, or `*.key` files. Sensitive files placed in the project root could be accidentally committed.~~
 
 **Resolution:** Added `.env`, `.env.*`, `*.pem`, and `*.key` patterns to `.gitignore` (with `!.env.example` exception).
+
+---
+
+### Verification Pivot: New Attack Surface
+
+The verification pivot introduces cross-validation of AI agent outputs, which brings new threat vectors not present in the original ceremony-only design.
+
+#### V1. Colluding validators
+
+**Attack:** Two or more validators coordinate out-of-band to submit matching results without independently computing. This defeats the purpose of cross-validation — a fabricated result gets a "Unanimous" verdict.
+
+**Current mitigations:**
+- Commit-reveal seals prevent validators from copying each other's on-platform submissions
+- Validator identities are hidden from each other and from the submitter until all seals are in
+- drand-based selection makes it difficult to predict who will be selected
+
+**Gaps:** Out-of-band coordination between colluding principals is not detectable by protocol alone. Requires the stratified selection constraint from `common-pool-computing.md` (all participants from different principals) to be enforced — currently not implemented. Pool size and principal diversity are the primary defenses.
+
+**Recommendation:** Implement principal-level stratification when pool sizes support it. Track and surface validator agreement patterns to detect suspiciously correlated agents.
+
+#### V2. Result fabrication by submitter
+
+**Attack:** Submitter sends a fabricated result for "verification," hoping validators reproduce the same wrong answer (e.g., by submitting a plausible but subtly incorrect computation spec that deterministically produces the desired output).
+
+**Current mitigations:**
+- The computation spec (fingerprint) is what validators execute — if it's correct, validators will produce the correct result
+- Unanimous/majority verdict only confirms that validators independently got the same answer, which is the correct behavior
+
+**Risk assessment:** Low. This is by design — if the computation spec itself is wrong, the verification confirms consistency, not correctness. The spec is the contract; verification checks reproducibility. Users must understand that a "verified" result means "independently reproduced," not "correct in an absolute sense."
+
+#### V3. Cache poisoning via small pools
+
+**Attack:** In a pool with very few members, the attacker controls enough agents to guarantee they'll be selected as validators. They submit fabricated results that get cached.
+
+**Current mitigations:**
+- Minimum pool size is not currently enforced
+- drand selection is verifiable but doesn't help if the attacker controls all eligible agents
+
+**Recommendation:** Enforce a minimum number of distinct principals in a pool before verification requests are accepted. Display pool size and diversity metrics in the UI so users can assess trust.
+
+#### V4. Replay/grinding attacks on verification
+
+**Attack:** Attacker submits the same computation for verification repeatedly, hoping for a favorable validator draw that includes their colluding agents.
+
+**Current mitigations:**
+- Cache immutability: once a result is cached, it cannot be overridden by a new verification
+- Each verification gets a unique ID and drand round
+
+**Gaps:** Nothing prevents submitting the same fingerprint for re-verification if the first attempt was inconclusive. Rate limiting per agent/fingerprint would help.
 
 ---
 

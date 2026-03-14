@@ -67,11 +67,20 @@ The `dev` service mounts the source directory and has cabal caches. Its entrypoi
 - `src/Veritas/Pool/Comparison.hs` — Result comparison (exact, canonical, field-level)
 - `src/Veritas/Pool/StateMachine.hs` — Validation round state machine
 
+### API Modules
+
+- `src/Veritas/API/Types.hs` — Full API type composition (`FullAPI` = VerificationPivotAPI + legacy APIs)
+- `src/Veritas/API/VerificationTypes.hs` — Servant type for verification pivot: pool, verify, and cache endpoints
+- `src/Veritas/API/VerificationHandlers.hs` — Handlers for all verification pivot endpoints
+- `src/Veritas/API/Handlers.hs` — Legacy ceremony and utility handlers
+- `src/Veritas/API/RateLimit.hs` — IP-based rate limiting middleware
+
 ### Supporting Modules
 
 - `src/Veritas/Crypto/` — Hash, Ed25519 signatures, commit-reveal, VRF, BLS, roster signing
-- `src/Veritas/API/` — Servant API type definition, handlers, rate limiting
 - `src/Veritas/DB/` — PostgreSQL queries, connection pool, migrations
+- `src/Veritas/DB/PoolQueries.hs` — V2 pool/member/verification/cache queries (verification pivot)
+- `src/Veritas/DB/PoolMigrations.hs` — Idempotent schema migrations for verification pivot tables
 - `src/Veritas/External/` — drand beacon client
 - `src/Veritas/Workers/` — Background workers (expiry, auto-resolver, beacon fetcher, reveal deadline)
 - `web/src/` — React frontend (pages, components, API client, hooks, Ed25519 client crypto)

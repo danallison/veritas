@@ -1,52 +1,42 @@
 # Veritas
 
-A verifiable social randomness service. Veritas provides cryptographically verifiable, tamper-evident randomness for scenarios where multiple parties need to trust a random outcome — raffles, coin tosses, draft orders, random assignments. Fairness is guaranteed through commitment schemes, an append-only hash-chained audit log, and optional external randomness beacons (drand).
+Verified AI output through independent cross-validation. Veritas ensures AI agent outputs can be trusted by having multiple independent agents reproduce computations and comparing results — no single agent's word is taken at face value.
 
-The name reflects the core promise: the truth of the outcome is established by the protocol, not by trust in any single party.
+The name reflects the core promise: truth is established by protocol, not by trust in any single party.
 
 ## How It Works
 
-A **ceremony** is the unit of social randomness — a complete lifecycle from creation through commitment, entropy collection, resolution, and finalization.
+Two foundational primitives:
+
+1. **Volunteer Pool** — A collection of agents (human or AI) who register with Ed25519 identity and commit to performing tasks when randomly selected. Selection uses verifiable randomness (drand beacon), so anyone can prove the draw was fair.
+
+2. **Ceremony** — A cryptographic commit-reveal protocol ensuring no validator can see another's work before submitting their own. This is what makes cross-validation meaningful — independence is enforced, not assumed.
+
+### Verification Flow
 
 ```
-Gathering → AwaitingRosterAcks → Pending → AwaitingReveals → AwaitingBeacon → Resolving → Finalized
+1. Submit    → Client submits computation + their result to a pool
+2. Select    → drand beacon randomly selects N validators from the pool
+3. Compute   → Each validator independently reproduces the computation
+4. Seal      → All results submitted as cryptographic commitments (no peeking)
+5. Reveal    → Once all seals are in, results are revealed simultaneously
+6. Verdict   → Compare: Unanimous (all agree) / Majority (2/3) / Inconclusive
+7. Cache     → Verified results cached by content-addressed fingerprint
 ```
 
-1. **Creation** — Define parameters: type of random event, number of parties, identity mode, deadline
-2. **Registration** (self-certified only) — Parties register Ed25519 public keys, then sign the roster to prove mutual awareness
-3. **Commitment** — Parties cryptographically commit to accepting the outcome *before* any randomness is visible (self-certified: commitments are signed)
-4. **Entropy Collection** — Randomness inputs are gathered via one of four strategies
-5. **Resolution** — The outcome is computed deterministically from collected entropy
-6. **Finalization** — The outcome, commitments, and entropy are sealed into a tamper-evident audit log
+### Why It Works
 
-### Entropy Strategies
-
-| Strategy | Description | Trust Model |
-|----------|-------------|-------------|
-| **ParticipantReveal** | Commit-reveal scheme — each party contributes entropy | No single party controls outcome |
-| **ExternalBeacon** | drand network randomness | Trust the beacon network |
-| **Combined** | Participant entropy XOR'd with beacon | Best of both (recommended) |
-| **OfficiantVRF** | Server-generated VRF randomness | Requires server trust, lowest friction |
-
-### Participant Identity
-
-All ceremonies use **self-certified identity**: each participant registers an Ed25519 keypair, signs the roster (proving they saw who else is participating), and signs their commitment. The ceremony record contains three layers of cryptographic evidence per participant — denying involvement requires claiming private key compromise.
-
-<!-- TODO: OAuth identity mode planned as a second option -->
-
-### Critical Invariants
-
-- No entropy is visible before all commitments are collected
-- Outcome derivation is deterministic — same entropy always produces the same result
-- Audit log entries are hash-chained — any tampering is detectable
-- Commitments are cryptographically binding
-- Self-certified identity is non-repudiable — public key, roster signature, and signed commitment are all recorded in the tamper-evident hash chain
+- **Commit-reveal** prevents validators from copying each other's answers
+- **drand beacon** makes validator selection verifiable and unpredictable
+- **Ed25519 signatures** make participation non-repudiable
+- **Hash-chained audit log** makes tampering detectable
+- **Content-addressed cache** stores verified results immutably
 
 ## Tech Stack
 
 - **Backend:** Haskell (GHC 9.6), Servant, PostgreSQL, crypton, katip
 - **Frontend:** React 19, TypeScript, Vite, Tailwind CSS, React Router v7
-- **Crypto:** SHA-256, Ed25519 (server signing + participant identity), BLS12-381 (drand verification), HKDF
+- **Crypto:** SHA-256, Ed25519, BLS12-381 (drand verification), HKDF
 - **Testing:** hspec, QuickCheck, Vitest
 - **Infrastructure:** Docker Compose
 
@@ -56,8 +46,8 @@ All ceremonies use **self-certified identity**: each participant registers an Ed
 # Start all services (PostgreSQL, backend, frontend)
 docker compose up -d
 
-# Frontend is at http://localhost:3002
-# Backend API is at http://localhost:8080
+# Frontend: http://localhost:3002
+# Backend API: http://localhost:8080
 ```
 
 ## Development
@@ -70,7 +60,7 @@ There is no local Haskell tooling required — all Haskell build and test comman
 # Build
 docker compose run --rm --entrypoint cabal dev build
 
-# Run tests (255 tests: unit, property-based, statistical)
+# Run tests (448 tests: unit, property-based, statistical)
 docker compose run --rm --entrypoint cabal dev test
 
 # Run a specific test module
@@ -85,13 +75,10 @@ docker compose up -d --build app
 ```bash
 cd web
 
-# Install dependencies
-npm install
-
 # Type check
 npx tsc --noEmit
 
-# Run tests (105 tests)
+# Run tests
 npx vitest run
 
 # Dev server (also available via docker compose)
@@ -104,62 +91,95 @@ npm run dev
 veritas/
 ├── app/                          # Haskell executable entry point
 ├── src/Veritas/
-│   ├── Core/                     # Ceremony state machine, resolution, entropy, audit log
-│   ├── Crypto/                   # Hash, signatures, commit-reveal, VRF, BLS
-│   ├── API/                      # Servant API types, handlers, rate limiting
+│   ├── Core/
+│   │   ├── Pool.hs              # Volunteer pool: member management, status lifecycle
+│   │   ├── TaskAssignment.hs    # Task posting + verifiable random selection (drand)
+│   │   ├── Verification.hs     # Cross-validation: submissions, verdict computation
+│   │   ├── VerifiedCache.hs    # Content-addressed cache of verified results
+│   │   ├── Types.hs            # Ceremony types, phases, entropy methods
+│   │   ├── StateMachine.hs     # Ceremony state machine (pure transitions)
+│   │   ├── Resolution.hs       # Deterministic outcome derivation
+│   │   ├── Entropy.hs          # Entropy combination logic
+│   │   └── AuditLog.hs         # Hash-chained tamper-evident audit log
+│   ├── Crypto/                   # Hash, Ed25519, commit-reveal, VRF, BLS, roster signing
+│   ├── API/
+│   │   ├── VerificationTypes.hs # Servant API type for verification pivot
+│   │   ├── VerificationHandlers.hs # Pool, verification, and cache handlers
+│   │   ├── Types.hs            # Full API composition
+│   │   └── Handlers.hs         # Ceremony and utility handlers
 │   ├── DB/                       # PostgreSQL queries, pool, migrations
-│   ├── Workers/                  # Background workers (expiry, resolver, beacon, reveal deadline)
-│   ├── External/                 # drand beacon client
-│   ├── Config.hs                 # Environment-variable configuration
-│   └── Logging.hs               # Katip structured logging
+│   ├── Workers/                  # Background workers (expiry, resolver, beacon, reveal)
+│   └── External/                 # drand beacon client
 ├── test/                         # Backend tests (hspec + QuickCheck)
 ├── web/src/                      # React frontend
-│   ├── api/                      # API client and TypeScript types
-│   ├── components/               # UI components (PhaseIndicator, OutcomeDisplay, AuditLog, ...)
-│   ├── hooks/                    # Custom hooks (useCeremony, useCeremonySecrets, useParticipant)
-│   ├── pages/                    # Route pages
-│   └── crypto/                   # Client-side entropy generation + Ed25519 identity
+│   ├── api/                      # API clients (ceremonies, verification)
+│   ├── pages/                    # Route pages (Verify, Pools, Cache, Advanced)
+│   ├── components/               # UI components
+│   ├── hooks/                    # Custom hooks
+│   └── crypto/                   # Client-side Ed25519 identity + entropy
 ├── docker-compose.yml
-├── Dockerfile                    # Development build
+├── Dockerfile
 ├── Dockerfile.prod               # Production multi-stage build
 ├── veritas.cabal
-└── randomness-service-design.md  # Full design document and roadmap
+├── ceremony-protocol.md          # Ceremony protocol specification
+└── common-pool-computing.md      # Cross-validated computation protocol
 ```
 
 ## API
 
-The backend serves a REST API with OpenAPI 3.0 documentation at `GET /docs`.
+The backend serves a REST API at `http://localhost:8080`.
 
-### Ceremony Lifecycle
+### Verification (Primary)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/verify` | Submit computation for cross-validation |
+| `GET` | `/verify/:id` | Get verification status and verdict |
+| `GET` | `/verify` | List all verifications |
+| `POST` | `/verify/:id/submit` | Record a validator's submission |
+
+### Volunteer Pools
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/pools` | List all pools with member counts |
+| `POST` | `/pools` | Create a new pool |
+| `GET` | `/pools/:id` | Get pool details |
+| `POST` | `/pools/:id/join` | Join pool with Ed25519 public key |
+| `GET` | `/pools/:id/members` | List pool members |
+
+### Verified Cache
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/cache` | List cached verified results |
+| `GET` | `/cache/stats` | Cache statistics |
+| `GET` | `/cache/:fingerprint` | Lookup by content fingerprint |
+
+### Ceremonies (Advanced)
 
 | Method | Path | Description |
 |--------|------|-------------|
 | `POST` | `/ceremonies` | Create a new ceremony |
 | `GET` | `/ceremonies/:id` | Get ceremony status |
-| `POST` | `/ceremonies/:id/join` | Register a public key (self-certified) |
-| `POST` | `/ceremonies/:id/ack-roster` | Sign the roster (self-certified) |
-| `GET` | `/ceremonies/:id/roster` | Get the participant roster |
+| `POST` | `/ceremonies/:id/join` | Register a public key |
+| `POST` | `/ceremonies/:id/ack-roster` | Sign the roster |
 | `POST` | `/ceremonies/:id/commit` | Submit a commitment |
 | `POST` | `/ceremonies/:id/reveal` | Reveal entropy |
 | `GET` | `/ceremonies/:id/outcome` | Get the resolved outcome |
 | `GET` | `/ceremonies/:id/log` | Get the audit log |
 | `GET` | `/ceremonies/:id/verify` | Verify audit log integrity |
 
-### Standalone Randomness
+### Utilities
 
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/random/coin` | Fair coin flip |
 | `GET` | `/random/integer?min=&max=` | Random integer in range |
 | `GET` | `/random/uuid` | Random UUID |
-
-### Info
-
-| Method | Path | Description |
-|--------|------|-------------|
 | `GET` | `/health` | Health check |
 | `GET` | `/server/pubkey` | Server public key |
-| `GET` | `/verify/beacon` | drand beacon verification guide |
+| `GET` | `/docs` | OpenAPI 3.0 documentation |
 
 ## Configuration
 
@@ -178,6 +198,12 @@ All configuration is via environment variables:
 | `VERITAS_RATE_WINDOW` | `60` | Rate limit window (seconds) |
 | `VERITAS_TLS_CERT` | — | TLS certificate path |
 | `VERITAS_TLS_KEY` | — | TLS key path |
+
+## Design Documents
+
+- **[Ceremony Protocol](ceremony-protocol.md)** — The general commit-reveal protocol specification, applicable to both randomness ceremonies and verification rounds
+- **[Common-Pool Computing](common-pool-computing.md)** — Detailed protocol for cross-validated computation caching, including threat model, validator selection, and governance
+- **[Pivot Plan](PIVOT.md)** — Implementation plan for the verification pivot
 
 ## License
 

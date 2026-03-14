@@ -1,5 +1,7 @@
 # Common-Pool Computing: Cross-Validated Computation Cache
 
+> **Note (March 2026):** This document describes the detailed cross-validation protocol that is now the primary focus of Veritas. The "volunteer pool" concept described here has been implemented as a first-class primitive (see `src/Veritas/Core/Pool.hs`), and the verification flow is implemented in `src/Veritas/Core/Verification.hs`. See [PIVOT.md](PIVOT.md) for overall implementation status. Some advanced features described here (sigchains, Merkle tree, challenges, graduated sanctions) are planned for Phase 6.
+
 ## 1. Overview
 
 A shared cache of computation results (primarily LLM inference) that have been independently computed by 3 agents and cross-validated before entry. Members query the cache; hits return validated results, misses trigger a validation round. The cache has two externally visible states: validated entry or no entry.
