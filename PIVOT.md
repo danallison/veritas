@@ -320,40 +320,80 @@ CREATE TABLE task_assignments (
 
 ## Implementation Order
 
-### Phase 1: Volunteer Pool Primitive
-1. Define core pool types in `src/Veritas/Core/Pool.hs`
-2. Database migration for `volunteer_pools`, `pool_members`, `task_assignments`
-3. Pool CRUD API endpoints
-4. Pool member management (join, leave, status)
-5. Selection logic: fair random subset selection via drand
-6. Tests: pool lifecycle, selection fairness properties
+### Phase 1: Core Domain Logic — DONE ✓
+Pure Haskell modules with no IO, covering all three primitives.
 
-### Phase 2: Cross-Validation Protocol
-1. Define verification types in `src/Veritas/Core/Verification.hs`
-2. Wire verification to ceremony (verification round = ceremony with pool-selected participants)
-3. Database migration for `verifications` table
-4. `/verify` API endpoints (submit, status, verdict)
-5. Validator participation endpoints (seal, reveal)
-6. Verdict computation logic (comparison methods: exact, canonical, field-level)
-7. Tests: verification lifecycle, verdict correctness
+1. ✅ `src/Veritas/Core/Pool.hs` — Volunteer pool types, member management, status guards
+2. ✅ `src/Veritas/Core/TaskAssignment.hs` — Task assignment with verifiable random selection, transition guards
+3. ✅ `src/Veritas/Core/Verification.hs` — Verification types, phases, verdict computation (Unanimous/MajorityAgree/Inconclusive)
+4. ✅ `src/Veritas/Core/VerifiedCache.hs` — Content-addressed cache, immutability, TTL expiration
+5. ✅ Tests: hspec + QuickCheck for all modules (pool lifecycle, task transitions, verdict correctness, cache semantics)
+6. ✅ Property tests: `Properties/PoolProperties.hs`
 
-### Phase 3: Result Cache
-1. Define cache types in `src/Veritas/Core/Cache.hs`
-2. Database migration for `verified_cache`
-3. Cache API endpoints (lookup, stats)
-4. Wire cache to verification (auto-cache on successful verification)
-5. TTL expiration worker
-6. Tests: cache semantics, content addressing
+### Phase 2: Frontend Rebuild — DONE ✓
+New verification-centric UI with routing, pages, and e2e tests.
 
-### Phase 4: Frontend Rebuild
-1. New routing structure (verify-centric)
-2. VerifyPage + VerificationSubmitForm
-3. VerificationDetailPage + VerdictDisplay
-4. PoolsPage + PoolDetailPage
-5. CachePage + CacheSearch
-6. Updated HomePage dashboard
-7. Demote ceremony/random pages to "Advanced" section
-8. Frontend tests
+1. ✅ New routing: `/verify/*`, `/pools/*`, `/cache`, `/advanced/*`
+2. ✅ VerifyPage — submission form with pool query param support
+3. ✅ VerificationDetailPage — phase progress, polling, verdict display
+4. ✅ PoolsPage + PoolDetailPage — browse, create, join pools
+5. ✅ CachePage — stats, fingerprint search, entry list
+6. ✅ AdvancedPage — index for demoted ceremony/random tools
+7. ✅ Updated HomePage, Layout nav, internal links
+8. ✅ Shared API client (`api/fetch.ts`) + verification API client
+9. ✅ Playwright e2e tests (25 tests)
+
+### Phase 3: Database Migrations — DONE ✓
+Idempotent ALTER TABLE + CREATE TABLE migrations for the verification pivot.
+
+1. ✅ Extended `pools` table: `description`, `task_type`, `selection_size` columns (ALTER TABLE IF NOT EXISTS)
+2. ✅ Extended `pool_members` table: `display_name`, `capabilities` (JSONB), `status` columns
+3. ✅ Created `verifications` table (id, pool_id, description, fingerprint, submitted_result, comparison_method, validator_count, submitter, validators, submission_count, expected_submissions, phase, verdict, created_at)
+4. ✅ Existing ceremony + cache tables preserved as-is
+5. ✅ All migrations idempotent (safe to re-run)
+
+### Phase 4: Backend API Wiring — DONE ✓
+New Servant API type, handlers, and DB queries for the verification pivot.
+
+#### 4a: Pool endpoints ✅
+1. ✅ `GET /pools` — list all pools with member counts
+2. ✅ `POST /pools` — create pool with new fields (description, task_type, selection_size)
+3. ✅ `GET /pools/:id` — get pool with member counts
+4. ✅ `POST /pools/:id/join` — join pool with Ed25519 public key validation
+5. ✅ `GET /pools/:id/members` — list members with capabilities
+6. ✅ New Servant type: `VerificationPivotAPI` in `VerificationTypes.hs`
+7. ✅ Handlers in `VerificationHandlers.hs` (new module)
+8. ✅ Queries in `PoolQueries.hs` (PoolV2Row, PoolMemberV2Row, new V2 queries)
+
+#### 4b: Verification endpoints ✅
+1. ✅ `POST /verify` — submit computation for cross-validation
+2. ✅ `GET /verify/:id` — get verification status + verdict
+3. ✅ `GET /verify` — list verifications
+4. ✅ `POST /verify/:id/submit` — record a validator's submission, auto-transition to "deciding" phase
+5. ✅ VerificationRow type + insertVerification, getVerification, listVerifications queries
+6. ✅ updateVerificationSubmissionCount, updateVerificationVerdict queries
+
+#### 4c: Cache endpoints ✅
+1. ✅ `GET /cache` — list all cached entries with provenance
+2. ✅ `GET /cache/:fingerprint` — lookup by fingerprint (hex-decoded)
+3. ✅ `GET /cache/stats` — cache statistics (total, unanimous, majority counts)
+4. ✅ Provenance format compatibility (old `outcome`/`validated_at` + new `verdict_outcome`/`cached_at`)
+
+#### 4d: Integration ✅
+1. ✅ VerificationPivotAPI wired into FullAPI (before PoolAPI so new shapes shadow old routes)
+2. ✅ App Main.hs updated to serve verificationServer
+3. ✅ Test environment (Integration/TestEnv.hs) updated
+4. ✅ All 448 backend tests pass
+5. ✅ Frontend ↔ backend verified working (all endpoints return correct data via Vite proxy)
+
+### Phase 4.5: Docker & Build Fixes — DONE ✓
+Fixed Docker infrastructure issues discovered during integration testing.
+
+1. ✅ Fixed Dockerfile: `haskell:9.8-slim` → `haskell:9.6-slim` (match dev GHC 9.6.7)
+2. ✅ Fixed Debian bullseye expired GPG signatures (`Acquire::Check-Valid-Until`)
+3. ✅ Generated `cabal.project.freeze` to pin dependency versions across builds
+4. ✅ Updated `docker-compose.yml`: app service mounts source + cabal volumes for fast iteration
+5. ✅ Diagnosed and resolved Docker Desktop containerd zombie process blocking all new containers
 
 ### Phase 5: Documentation & Polish
 1. Rewrite README.md

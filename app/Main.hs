@@ -11,6 +11,7 @@ import Servant (serve, (:<|>)((:<|>)))
 import Veritas.API.Types (fullApi)
 import Veritas.API.Handlers (server, docsHandler, AppEnv(..))
 import Veritas.API.PoolHandlers (poolServer)
+import Veritas.API.VerificationHandlers (verificationServer)
 import Veritas.API.RateLimit (newRateLimiter, RateLimitConfig(..))
 import Veritas.Config (loadConfig, Config(..), WorkerConfig(..), DrandConfig(..))
 import Veritas.Crypto.Signatures (loadOrGenerateKeyPair)
@@ -84,7 +85,7 @@ main = bracket initLogEnv closeLogEnv $ \logEnv -> do
   let middleware :: Middleware
       middleware = logStdout . rateLimiter . cors corsPolicy
 
-  let app = middleware (serve fullApi (server env :<|> poolServer env :<|> docsHandler))
+  let app = middleware (serve fullApi (server env :<|> verificationServer env :<|> poolServer env :<|> docsHandler))
 
   -- Start background workers
   withAsync (runExpiryChecker logEnv pool (workerExpiryInterval workerCfg)) $ \_ ->

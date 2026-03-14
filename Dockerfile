@@ -1,8 +1,12 @@
-FROM haskell:9.8-slim
+FROM haskell:9.6-slim
 
 WORKDIR /app
 
-RUN apt-get update \
+# Install system dependencies.
+# Acquire-Check-Valid-Until=false works around expired Release files
+# in older Debian (bullseye) base images.
+RUN echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99no-check-valid \
+    && apt-get update \
     && apt-get install -y curl gnupg lsb-release pkg-config \
     && curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
        | gpg --dearmor -o /usr/share/keyrings/postgresql.gpg \

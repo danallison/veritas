@@ -25,6 +25,10 @@ services:
       VERITAS_DB: "host=db port=5432 dbname=veritas user=veritas password=veritas"
     ports:
       - "8080:8080"
+    volumes:
+      - .:/app
+      - cabal-store:/root/.local/state/cabal/store
+      - cabal-cache:/root/.cache/cabal
 
   # Production container: multi-stage build, small image
   app-prod:

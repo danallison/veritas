@@ -99,6 +99,8 @@ library
     Veritas.DB.PoolQueries
     Veritas.API.PoolTypes
     Veritas.API.PoolHandlers
+    Veritas.API.VerificationTypes
+    Veritas.API.VerificationHandlers
     Veritas.Workers.ValidatorSelector
 
 executable veritas

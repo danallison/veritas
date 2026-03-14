@@ -3,19 +3,37 @@ module Veritas.DB.PoolQueries
   ( -- * Pools
     insertPool
   , getPool
+  , listPools
+  , insertPoolV2
+  , getPoolV2
+  , listPoolsV2
   , PoolRow(..)
+  , PoolV2Row(..)
 
     -- * Pool Members
   , insertPoolMember
+  , insertPoolMemberV2
   , getPoolMembers
+  , getPoolMembersV2
   , getPoolMember
   , PoolMemberRow(..)
+  , PoolMemberV2Row(..)
 
     -- * Cache Entries
   , insertCacheEntry
   , getCacheEntry
   , getPoolCacheEntries
+  , getAllCacheEntries
+  , countCacheEntries
   , CacheEntryRow(..)
+
+    -- * Verifications
+  , insertVerification
+  , getVerification
+  , listVerifications
+  , updateVerificationSubmissionCount
+  , updateVerificationVerdict
+  , VerificationRow(..)
 
     -- * Validation Rounds
   , insertValidationRound
@@ -254,6 +272,164 @@ updateSealReveal conn roundId agentId result evidence nonce = do
     \SET revealed_result = ?, revealed_evidence = ?, revealed_nonce = ?, phase = 'revealed' \
     \WHERE round_id = ? AND agent_id = ?"
     (Binary result, evidence, Binary nonce, roundId, agentId)
+  pure ()
+
+-- === Pool V2 Operations (verification pivot) ===
+
+data PoolV2Row = PoolV2Row
+  { pv2Id            :: UUID
+  , pv2Name          :: Text
+  , pv2Description   :: Text
+  , pv2TaskType      :: Text
+  , pv2SelectionSize :: Int
+  , pv2CreatedAt     :: UTCTime
+  } deriving stock (Show)
+
+instance FromRow PoolV2Row where
+  fromRow = PoolV2Row <$> field <*> field <*> field <*> field <*> field <*> field
+
+listPools :: Connection -> IO [PoolRow]
+listPools conn =
+  query_ conn "SELECT id, name, config, created_at FROM pools ORDER BY created_at DESC"
+
+listPoolsV2 :: Connection -> IO [PoolV2Row]
+listPoolsV2 conn =
+  query_ conn
+    "SELECT id, name, COALESCE(description, ''), COALESCE(task_type, 'cross_validation'), \
+    \COALESCE(selection_size, 2), created_at FROM pools ORDER BY created_at DESC"
+
+getPoolV2 :: Connection -> UUID -> IO (Maybe PoolV2Row)
+getPoolV2 conn pid =
+  safeHead <$> query conn
+    "SELECT id, name, COALESCE(description, ''), COALESCE(task_type, 'cross_validation'), \
+    \COALESCE(selection_size, 2), created_at FROM pools WHERE id = ?"
+    (Only pid)
+
+insertPoolV2 :: Connection -> UUID -> Text -> Text -> Text -> Int -> UTCTime -> IO ()
+insertPoolV2 conn pid name description taskType selectionSize createdAt = do
+  _ <- execute conn
+    "INSERT INTO pools (id, name, config, description, task_type, selection_size, created_at) \
+    \VALUES (?, ?, '{}', ?, ?, ?, ?)"
+    (pid, name, description, taskType, selectionSize, createdAt)
+  pure ()
+
+-- === Pool Member V2 Operations (verification pivot) ===
+
+data PoolMemberV2Row = PoolMemberV2Row
+  { pmv2PoolId       :: UUID
+  , pmv2AgentId      :: UUID
+  , pmv2PublicKey     :: ByteString
+  , pmv2DisplayName  :: Text
+  , pmv2Capabilities :: Value
+  , pmv2Status       :: Text
+  , pmv2JoinedAt     :: UTCTime
+  } deriving stock (Show)
+
+instance FromRow PoolMemberV2Row where
+  fromRow = PoolMemberV2Row <$> field <*> field <*> field <*> field <*> field <*> field <*> field
+
+getPoolMembersV2 :: Connection -> UUID -> IO [PoolMemberV2Row]
+getPoolMembersV2 conn poolId =
+  query conn
+    "SELECT pool_id, agent_id, public_key, COALESCE(display_name, principal_id), \
+    \COALESCE(capabilities, '[]'), COALESCE(status, 'active'), joined_at \
+    \FROM pool_members WHERE pool_id = ? ORDER BY joined_at"
+    (Only poolId)
+
+insertPoolMemberV2 :: Connection -> UUID -> UUID -> ByteString -> Text -> Text -> Value -> UTCTime -> IO ()
+insertPoolMemberV2 conn poolId agentId pk displayName principalId capabilities joinedAt = do
+  _ <- execute conn
+    "INSERT INTO pool_members (pool_id, agent_id, public_key, principal_id, display_name, capabilities, joined_at) \
+    \VALUES (?, ?, ?, ?, ?, ?, ?)"
+    (poolId, agentId, Binary pk, principalId, displayName, capabilities, joinedAt)
+  pure ()
+
+-- === Cache Extended Operations ===
+
+getAllCacheEntries :: Connection -> IO [CacheEntryRow]
+getAllCacheEntries conn =
+  query_ conn
+    "SELECT pool_id, fingerprint, result, provenance, computation_spec, created_at, expires_at \
+    \FROM cache_entries ORDER BY created_at DESC"
+
+countCacheEntries :: Connection -> IO (Int, Int, Int)
+countCacheEntries conn = do
+  rows <- query_ conn
+    "SELECT \
+    \  COUNT(*), \
+    \  COUNT(*) FILTER (WHERE provenance->'outcome'->>'tag' = 'Unanimous'), \
+    \  COUNT(*) FILTER (WHERE provenance->'outcome'->>'tag' = 'Majority') \
+    \FROM cache_entries"
+    :: IO [(Int, Int, Int)]
+  case rows of
+    ((total, unan, maj):_) -> pure (total, unan, maj)
+    []                     -> pure (0, 0, 0)
+
+-- === Verification Operations ===
+
+data VerificationRow = VerificationRow
+  { vrId                  :: UUID
+  , vrPoolId              :: UUID
+  , vrDescription         :: Text
+  , vrFingerprint         :: Text
+  , vrSubmittedResult     :: Maybe Text
+  , vrComparisonMethod    :: Text
+  , vrValidatorCount      :: Int
+  , vrSubmitter           :: UUID
+  , vrValidators          :: Value
+  , vrSubmissionCount     :: Int
+  , vrExpectedSubmissions :: Int
+  , vrPhase               :: Text
+  , vrVerdict             :: Maybe Value
+  , vrCreatedAt           :: UTCTime
+  } deriving stock (Show)
+
+instance FromRow VerificationRow where
+  fromRow = VerificationRow
+    <$> field <*> field <*> field <*> field <*> field
+    <*> field <*> field <*> field <*> field <*> field
+    <*> field <*> field <*> field <*> field
+
+insertVerification :: Connection -> UUID -> UUID -> Text -> Text -> Maybe Text -> Text -> Int -> UUID -> Value -> Int -> UTCTime -> IO ()
+insertVerification conn vid poolId description fingerprint submittedResult compMethod validatorCount submitter validators expectedSubmissions createdAt = do
+  _ <- execute conn
+    "INSERT INTO verifications \
+    \(id, pool_id, description, fingerprint, submitted_result, comparison_method, \
+    \validator_count, submitter, validators, submission_count, expected_submissions, phase, created_at) \
+    \VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 'collecting', ?)"
+    ((vid, poolId, description, fingerprint, submittedResult)
+      :. (compMethod, validatorCount, submitter, validators, expectedSubmissions, createdAt))
+  pure ()
+
+getVerification :: Connection -> UUID -> IO (Maybe VerificationRow)
+getVerification conn vid =
+  safeHead <$> query conn
+    "SELECT id, pool_id, description, fingerprint, submitted_result, comparison_method, \
+    \validator_count, submitter, validators, submission_count, expected_submissions, \
+    \phase, verdict, created_at \
+    \FROM verifications WHERE id = ?"
+    (Only vid)
+
+listVerifications :: Connection -> IO [VerificationRow]
+listVerifications conn =
+  query_ conn
+    "SELECT id, pool_id, description, fingerprint, submitted_result, comparison_method, \
+    \validator_count, submitter, validators, submission_count, expected_submissions, \
+    \phase, verdict, created_at \
+    \FROM verifications ORDER BY created_at DESC"
+
+updateVerificationSubmissionCount :: Connection -> UUID -> Int -> IO ()
+updateVerificationSubmissionCount conn vid count = do
+  _ <- execute conn
+    "UPDATE verifications SET submission_count = ? WHERE id = ?"
+    (count, vid)
+  pure ()
+
+updateVerificationVerdict :: Connection -> UUID -> Text -> Value -> IO ()
+updateVerificationVerdict conn vid phase verdict = do
+  _ <- execute conn
+    "UPDATE verifications SET phase = ?, verdict = ? WHERE id = ?"
+    (phase, verdict, vid)
   pure ()
 
 -- === Helpers ===

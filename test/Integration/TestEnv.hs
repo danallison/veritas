@@ -25,6 +25,7 @@ import Test.Hspec (expectationFailure)
 
 import Veritas.API.Handlers (AppEnv(..), server, docsHandler)
 import Veritas.API.PoolHandlers (poolServer)
+import Veritas.API.VerificationHandlers (verificationServer)
 import Veritas.API.Types (fullApi)
 import Veritas.Config (DrandConfig(..))
 import Veritas.Crypto.Signatures (KeyPair, generateKeyPair)
@@ -65,7 +66,7 @@ withTestApp action = do
         , envLogEnv      = logEnv
         , envDrandConfig = drandCfg
         }
-      app = serve fullApi (server env :<|> poolServer env :<|> docsHandler)
+      app = serve fullApi (server env :<|> verificationServer env :<|> poolServer env :<|> docsHandler)
       ienv = IntegrationEnv
         { ieApp     = app
         , iePool    = pool

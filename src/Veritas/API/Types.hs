@@ -49,6 +49,7 @@ import Servant.API
 
 import Veritas.Core.Types (Phase, CeremonyType, EntropyMethod, CommitmentMode, NonParticipationPolicy, BeaconSpec, IdentityMode)
 import Veritas.API.PoolTypes (PoolAPI)
+import Veritas.API.VerificationTypes (VerificationPivotAPI)
 
 -- | The full Veritas API
 type VeritasAPI =
@@ -81,8 +82,11 @@ type VeritasAPI =
 api :: Proxy VeritasAPI
 api = Proxy
 
--- | Full API including pool computing and the docs endpoint
-type FullAPI = VeritasAPI :<|> PoolAPI :<|> "docs" :> Get '[JSON] Data.OpenApi.OpenApi
+-- | Full API including verification pivot, pool computing, and docs
+-- VerificationPivotAPI first so its /pools and /verify routes take precedence
+-- over the legacy PoolAPI shapes. The old PoolAPI's unique endpoints
+-- (/pools/:id/compute, /pools/:id/rounds/*, etc.) remain reachable.
+type FullAPI = VeritasAPI :<|> VerificationPivotAPI :<|> PoolAPI :<|> "docs" :> Get '[JSON] Data.OpenApi.OpenApi
 
 fullApi :: Proxy FullAPI
 fullApi = Proxy
